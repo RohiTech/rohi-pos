@@ -23,7 +23,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen text-brand-ink">
       <div className="mx-auto grid min-h-screen max-w-7xl gap-6 px-4 py-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:px-6">
-        <aside className="rounded-[2rem] bg-brand-forest p-6 text-brand-cream shadow-panel">
+        <aside className="rounded-[2rem] bg-brand-forest p-6 text-brand-cream shadow-panel lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
           <div className="mb-10">
             <p className="text-sm uppercase tracking-[0.3em] text-brand-sand/80">RohiPOS</p>
             <h1 className="mt-3 font-display text-4xl leading-none">Gym control with a sales pulse.</h1>
@@ -66,7 +66,7 @@ export function AppShell() {
           </div>
         </aside>
 
-        <main className="rounded-[2rem] border border-brand-sand/60 bg-white/75 p-5 shadow-panel backdrop-blur lg:p-8">
+        <main className="rounded-[2rem] border border-brand-sand/60 bg-white/75 p-5 shadow-panel backdrop-blur lg:min-h-[calc(100vh-2rem)] lg:p-8">
           <Outlet />
         </main>
       </div>

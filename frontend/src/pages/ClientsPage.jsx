@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
+import { Pagination } from '../components/Pagination';
 import { apiGet, apiPost, apiPut } from '../lib/api';
 import { formatDate } from '../lib/format';
 
@@ -17,8 +18,13 @@ const initialClientForm = {
   is_active: true
 };
 
+const PAGE_SIZE = 8;
+
 export function ClientsPage() {
+  const [activeView, setActiveView] = useState('list');
   const [clients, setClients] = useState([]);
+  const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -43,6 +49,10 @@ export function ClientsPage() {
     loadClients();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
   function handleChange(event) {
     const { name, value, type, checked } = event.target;
     setForm((current) => ({
@@ -54,6 +64,7 @@ export function ClientsPage() {
   function resetForm() {
     setEditingClientId(null);
     setForm(initialClientForm);
+    setActiveView('form');
   }
 
   function startEdit(client) {
@@ -70,6 +81,7 @@ export function ClientsPage() {
       is_active: Boolean(client.is_active)
     });
     setError('');
+    setActiveView('form');
   }
 
   async function handleSubmit(event) {
@@ -93,8 +105,10 @@ export function ClientsPage() {
         await apiPost('/clients', payload);
       }
 
-      resetForm();
+      setEditingClientId(null);
+      setForm(initialClientForm);
       await loadClients();
+      setActiveView('list');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible guardar el cliente');
     } finally {
@@ -106,26 +120,68 @@ export function ClientsPage() {
     setError('');
 
     try {
-      await apiPut(`/clients/${client.id}`, {
-        is_active: !client.is_active
-      });
+      await apiPut(`/clients/${client.id}`, { is_active: !client.is_active });
       await loadClients();
     } catch (requestError) {
       setError(requestError.message || 'No fue posible actualizar el estado del cliente');
     }
   }
 
+  const filteredClients = clients.filter((client) => {
+    const term = search.trim().toLowerCase();
+
+    if (!term) {
+      return true;
+    }
+
+    return [client.client_code, client.first_name, client.last_name, client.email, client.phone]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(term));
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredClients.length / PAGE_SIZE));
+  const paginatedClients = filteredClients.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
+
   return (
     <div>
       <PageHeader
         eyebrow="Base de clientes"
         title="Clientes del gimnasio"
-        description="Ya puedes crear, editar y desactivar clientes desde esta pantalla."
+        description="El modulo se divide en ventanas separadas para listado y formulario."
       />
 
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
 
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.35fr]">
+      <div className="mb-6 flex flex-wrap gap-3">
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'list' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => setActiveView('list')}
+          type="button"
+        >
+          Listado
+        </button>
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => {
+            if (!editingClientId) {
+              setForm(initialClientForm);
+            }
+            setActiveView('form');
+          }}
+          type="button"
+        >
+          {editingClientId ? 'Editar cliente' : 'Nuevo cliente'}
+        </button>
+      </div>
+
+      {activeView === 'form' ? (
         <DataPanel
           title={editingClientId ? 'Editar cliente' : 'Registrar cliente'}
           subtitle="Formulario inicial para recepcion y administracion."
@@ -195,13 +251,21 @@ export function ClientsPage() {
             </div>
           </form>
         </DataPanel>
-
+      ) : (
         <DataPanel title="Clientes registrados" subtitle="Listado con edicion rapida y activacion o desactivacion.">
+          <div className="mb-4">
+            <input
+              className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por codigo, nombre, correo o telefono"
+              value={search}
+            />
+          </div>
           {loading ? <p className="text-sm text-brand-forest/70">Cargando clientes...</p> : null}
-          {!loading && !clients.length ? (
-            <EmptyState title="Sin clientes" description="Todavia no hay clientes registrados en la base de datos." />
+          {!loading && !filteredClients.length ? (
+            <EmptyState title="Sin resultados" description="No hay clientes que coincidan con la busqueda actual." />
           ) : null}
-          {clients.length ? (
+          {filteredClients.length ? (
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className="text-brand-forest/70">
@@ -215,7 +279,7 @@ export function ClientsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {clients.map((client) => (
+                  {paginatedClients.map((client) => (
                     <tr key={client.id} className="border-t border-brand-sand/60">
                       <td className="py-3 font-semibold text-brand-forest">{client.client_code}</td>
                       <td className="py-3">{client.first_name} {client.last_name}</td>
@@ -245,8 +309,9 @@ export function ClientsPage() {
               </table>
             </div>
           ) : null}
+          <Pagination currentPage={currentPage} itemLabel="clientes" onPageChange={setCurrentPage} pageSize={PAGE_SIZE} totalItems={filteredClients.length} totalPages={totalPages} />
         </DataPanel>
-      </section>
+      )}
     </div>
   );
 }

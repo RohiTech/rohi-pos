@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
+import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiGet, apiPost, apiPut } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -25,10 +26,18 @@ const initialMembershipForm = {
   notes: ''
 };
 
+const PLAN_PAGE_SIZE = 6;
+const MEMBERSHIP_PAGE_SIZE = 6;
+
 export function MembershipsPage() {
+  const [activeView, setActiveView] = useState('membership-list');
   const [plans, setPlans] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [clients, setClients] = useState([]);
+  const [planSearch, setPlanSearch] = useState('');
+  const [membershipSearch, setMembershipSearch] = useState('');
+  const [planPage, setPlanPage] = useState(1);
+  const [membershipPage, setMembershipPage] = useState(1);
   const [plansLoading, setPlansLoading] = useState(true);
   const [membershipsLoading, setMembershipsLoading] = useState(true);
   const [planForm, setPlanForm] = useState(initialPlanForm);
@@ -66,6 +75,14 @@ export function MembershipsPage() {
     loadPageData();
   }, []);
 
+  useEffect(() => {
+    setPlanPage(1);
+  }, [planSearch]);
+
+  useEffect(() => {
+    setMembershipPage(1);
+  }, [membershipSearch]);
+
   function handlePlanChange(event) {
     const { name, value, type, checked } = event.target;
     setPlanForm((current) => ({
@@ -85,11 +102,13 @@ export function MembershipsPage() {
   function resetPlanForm() {
     setEditingPlanId(null);
     setPlanForm(initialPlanForm);
+    setActiveView('plan-form');
   }
 
   function resetMembershipForm() {
     setEditingMembershipId(null);
     setMembershipForm(initialMembershipForm);
+    setActiveView('membership-form');
   }
 
   function startEditPlan(plan) {
@@ -101,6 +120,7 @@ export function MembershipsPage() {
       price: String(plan.price || ''),
       is_active: Boolean(plan.is_active)
     });
+    setActiveView('plan-form');
   }
 
   function startEditMembership(membership) {
@@ -115,6 +135,7 @@ export function MembershipsPage() {
       amount_paid: String(membership.amount_paid || ''),
       notes: membership.notes || ''
     });
+    setActiveView('membership-form');
   }
 
   async function handlePlanSubmit(event) {
@@ -135,8 +156,10 @@ export function MembershipsPage() {
         await apiPost('/membership-plans', payload);
       }
 
-      resetPlanForm();
+      setEditingPlanId(null);
+      setPlanForm(initialPlanForm);
       await loadPageData();
+      setActiveView('plan-list');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible guardar el plan');
     } finally {
@@ -172,8 +195,10 @@ export function MembershipsPage() {
         });
       }
 
-      resetMembershipForm();
+      setEditingMembershipId(null);
+      setMembershipForm(initialMembershipForm);
       await loadPageData();
+      setActiveView('membership-list');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible guardar la membresia');
     } finally {
@@ -185,9 +210,7 @@ export function MembershipsPage() {
     setError('');
 
     try {
-      await apiPut(`/membership-plans/${plan.id}`, {
-        is_active: !plan.is_active
-      });
+      await apiPut(`/membership-plans/${plan.id}`, { is_active: !plan.is_active });
       await loadPageData();
     } catch (requestError) {
       setError(requestError.message || 'No fue posible actualizar el plan');
@@ -207,32 +230,74 @@ export function MembershipsPage() {
     }
   }
 
+  const filteredPlans = plans.filter((plan) => {
+    const term = planSearch.trim().toLowerCase();
+
+    if (!term) {
+      return true;
+    }
+
+    return [plan.name, plan.description, plan.duration_days, plan.price]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(term));
+  });
+
+  const filteredMemberships = memberships.filter((membership) => {
+    const term = membershipSearch.trim().toLowerCase();
+
+    if (!term) {
+      return true;
+    }
+
+    return [
+      membership.membership_number,
+      membership.client_code,
+      membership.client_first_name,
+      membership.client_last_name,
+      membership.plan_name,
+      membership.status
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(term));
+  });
+
+  const totalPlanPages = Math.max(1, Math.ceil(filteredPlans.length / PLAN_PAGE_SIZE));
+  const totalMembershipPages = Math.max(1, Math.ceil(filteredMemberships.length / MEMBERSHIP_PAGE_SIZE));
+
+  const paginatedPlans = filteredPlans.slice((planPage - 1) * PLAN_PAGE_SIZE, planPage * PLAN_PAGE_SIZE);
+  const paginatedMemberships = filteredMemberships.slice(
+    (membershipPage - 1) * MEMBERSHIP_PAGE_SIZE,
+    membershipPage * MEMBERSHIP_PAGE_SIZE
+  );
+
   return (
     <div>
       <PageHeader
         eyebrow="Membresias"
         title="Planes y control de vigencia"
-        description="Ya puedes crear planes, registrar membresias, editarlas y cancelarlas."
+        description="El modulo se divide en ventanas separadas para planes y membresias."
       />
 
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
 
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <DataPanel
-          title={editingPlanId ? 'Editar plan' : 'Crear plan'}
-          subtitle="Configura duracion y precio."
-        >
+      <div className="mb-6 flex flex-wrap gap-3">
+        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'plan-list' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => setActiveView('plan-list')} type="button">Planes</button>
+        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'plan-form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => { if (!editingPlanId) setPlanForm(initialPlanForm); setActiveView('plan-form'); }} type="button">{editingPlanId ? 'Editar plan' : 'Nuevo plan'}</button>
+        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'membership-list' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => setActiveView('membership-list')} type="button">Membresias</button>
+        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'membership-form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => { if (!editingMembershipId) setMembershipForm(initialMembershipForm); setActiveView('membership-form'); }} type="button">{editingMembershipId ? 'Editar membresia' : 'Nueva membresia'}</button>
+      </div>
+
+      {activeView === 'plan-form' ? (
+        <DataPanel title={editingPlanId ? 'Editar plan' : 'Crear plan'} subtitle="Configura duracion y precio.">
           <form className="grid gap-4" onSubmit={handlePlanSubmit}>
             <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Nombre</span>
               <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="name" onChange={handlePlanChange} required value={planForm.name} />
             </label>
-
             <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Descripcion</span>
               <textarea className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="description" onChange={handlePlanChange} value={planForm.description} />
             </label>
-
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Dias</span>
@@ -243,12 +308,10 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="price" onChange={handlePlanChange} required step="0.01" type="number" value={planForm.price} />
               </label>
             </div>
-
             <label className="flex items-center gap-3 text-sm font-semibold text-brand-forest">
               <input checked={planForm.is_active} name="is_active" onChange={handlePlanChange} type="checkbox" />
               Plan activo
             </label>
-
             <div className="flex flex-wrap gap-3">
               <button className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60" disabled={planSaving} type="submit">
                 {planSaving ? 'Guardando...' : editingPlanId ? 'Actualizar plan' : 'Crear plan'}
@@ -259,11 +322,10 @@ export function MembershipsPage() {
             </div>
           </form>
         </DataPanel>
+      ) : null}
 
-        <DataPanel
-          title={editingMembershipId ? 'Editar membresia' : 'Registrar membresia'}
-          subtitle="Asigna un plan a un cliente activo."
-        >
+      {activeView === 'membership-form' ? (
+        <DataPanel title={editingMembershipId ? 'Editar membresia' : 'Registrar membresia'} subtitle="Asigna un plan a un cliente activo.">
           <form className="grid gap-4" onSubmit={handleMembershipSubmit}>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
@@ -277,7 +339,6 @@ export function MembershipsPage() {
                   ))}
                 </select>
               </label>
-
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Plan</span>
                 <select className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" disabled={Boolean(editingMembershipId)} name="plan_id" onChange={handleMembershipChange} required value={membershipForm.plan_id}>
@@ -290,7 +351,6 @@ export function MembershipsPage() {
                 </select>
               </label>
             </div>
-
             <div className="grid gap-4 md:grid-cols-3">
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Numero</span>
@@ -305,7 +365,6 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="end_date" onChange={handleMembershipChange} type="date" value={membershipForm.end_date} />
               </label>
             </div>
-
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Descuento</span>
@@ -316,12 +375,10 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="amount_paid" onChange={handleMembershipChange} step="0.01" type="number" value={membershipForm.amount_paid} />
               </label>
             </div>
-
             <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Notas</span>
               <textarea className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="notes" onChange={handleMembershipChange} value={membershipForm.notes} />
             </label>
-
             <div className="flex flex-wrap gap-3">
               <button className="rounded-2xl bg-brand-clay px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60" disabled={membershipSaving} type="submit">
                 {membershipSaving ? 'Guardando...' : editingMembershipId ? 'Actualizar membresia' : 'Crear membresia'}
@@ -332,15 +389,18 @@ export function MembershipsPage() {
             </div>
           </form>
         </DataPanel>
-      </section>
+      ) : null}
 
-      <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.3fr]">
+      {activeView === 'plan-list' ? (
         <DataPanel title="Planes disponibles" subtitle="Catalogo base para las ventas de membresias.">
+          <div className="mb-4">
+            <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setPlanSearch(event.target.value)} placeholder="Buscar plan por nombre, descripcion o precio" value={planSearch} />
+          </div>
           {plansLoading ? <p className="text-sm text-brand-forest/70">Cargando planes...</p> : null}
-          {!plansLoading && !plans.length ? <EmptyState title="Sin planes" description="Agrega planes para comenzar a vender membresias desde recepcion." /> : null}
-          {plans.length ? (
+          {!plansLoading && !filteredPlans.length ? <EmptyState title="Sin resultados" description="No hay planes que coincidan con la busqueda actual." /> : null}
+          {filteredPlans.length ? (
             <div className="grid gap-3">
-              {plans.map((plan) => (
+              {paginatedPlans.map((plan) => (
                 <article key={plan.id} className="rounded-2xl border border-brand-sand/70 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -364,14 +424,20 @@ export function MembershipsPage() {
               ))}
             </div>
           ) : null}
+          <Pagination currentPage={planPage} itemLabel="planes" onPageChange={setPlanPage} pageSize={PLAN_PAGE_SIZE} totalItems={filteredPlans.length} totalPages={totalPlanPages} />
         </DataPanel>
+      ) : null}
 
+      {activeView === 'membership-list' ? (
         <DataPanel title="Membresias registradas" subtitle="Seguimiento de cliente, plan, estado y saldo pendiente.">
+          <div className="mb-4">
+            <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setMembershipSearch(event.target.value)} placeholder="Buscar por cliente, codigo, plan, numero o estado" value={membershipSearch} />
+          </div>
           {membershipsLoading ? <p className="text-sm text-brand-forest/70">Cargando membresias...</p> : null}
-          {!membershipsLoading && !memberships.length ? <EmptyState title="No hay membresias" description="Cuando registremos ventas de membresias, apareceran aqui." /> : null}
-          {memberships.length ? (
+          {!membershipsLoading && !filteredMemberships.length ? <EmptyState title="Sin resultados" description="No hay membresias que coincidan con la busqueda actual." /> : null}
+          {filteredMemberships.length ? (
             <div className="space-y-3">
-              {memberships.map((membership) => (
+              {paginatedMemberships.map((membership) => (
                 <div key={membership.id} className="rounded-2xl border border-brand-sand/70 px-4 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
@@ -384,7 +450,6 @@ export function MembershipsPage() {
                     </div>
                     <StatusBadge value={membership.status} />
                   </div>
-
                   <div className="mt-4 grid gap-3 text-sm text-brand-forest/80 md:grid-cols-3">
                     <div>
                       <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Inicio</p>
@@ -399,7 +464,6 @@ export function MembershipsPage() {
                       <p className="mt-1 font-semibold text-brand-clay">{formatCurrency(membership.balance_due)}</p>
                     </div>
                   </div>
-
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={() => startEditMembership(membership)} type="button">
                       Editar
@@ -412,8 +476,9 @@ export function MembershipsPage() {
               ))}
             </div>
           ) : null}
+          <Pagination currentPage={membershipPage} itemLabel="membresias" onPageChange={setMembershipPage} pageSize={MEMBERSHIP_PAGE_SIZE} totalItems={filteredMemberships.length} totalPages={totalMembershipPages} />
         </DataPanel>
-      </section>
+      ) : null}
     </div>
   );
 }
