@@ -1,171 +1,317 @@
 # RohiPOS
 
-**RohiPOS** es un sistema web de **Punto de Venta (POS) y gestión de gimnasios**, diseñado para ayudar a centros de entrenamiento a administrar sus clientes, membresías, ventas de productos e inventario desde una interfaz moderna accesible desde cualquier navegador.
+**RohiPOS** es un sistema web de **gestion para gimnasios y punto de venta (POS)**. Su objetivo es centralizar en una sola plataforma el control de clientes, membresias, ventas, inventario, caja y acceso al gimnasio, funcionando directamente desde el navegador.
 
-El sistema funciona completamente en el navegador y está alojado en una **VPS en la nube**, lo que permite acceder desde **Mac, Windows, tablets o teléfonos móviles** sin necesidad de instalar software adicional.
-
----
-
-# Objetivo del Proyecto
-
-El objetivo de RohiPOS es ofrecer una plataforma simple, moderna y eficiente para gimnasios que necesitan gestionar:
-
-* Clientes
-* Membresías
-* Ventas de productos
-* Inventario
-* Reportes financieros
-* Control de acceso de miembros
-
-El sistema está diseñado para ser **escalable**, permitiendo en el futuro convertirse en una **plataforma SaaS para múltiples gimnasios**.
+El sistema esta pensado para clientes que trabajan desde **Mac, Windows, tablets o telefonos moviles**, sin instalar software adicional. Toda la aplicacion se desplegara en una **VPS con Ubuntu**, permitiendo acceso remoto, mantenimiento centralizado y crecimiento futuro hacia un modelo SaaS.
 
 ---
 
-# Funcionalidades Principales
+# Vision del Proyecto
 
-## Gestión de Clientes
+RohiPOS nace para resolver las operaciones diarias de un gimnasio desde un solo sistema:
 
-* Registrar nuevos clientes
-* Almacenar información de contacto
-* Subir fotografía del cliente
-* Registrar fecha de inscripción
-* Consultar historial del cliente
+- Registrar y administrar clientes
+- Controlar membresias activas, vencidas y renovaciones
+- Gestionar ventas de productos en mostrador
+- Mantener inventario actualizado
+- Llevar caja y reportes operativos
+- Validar acceso de miembros al gimnasio
 
-## Gestión de Membresías
-
-* Planes mensuales, semanales o anuales
-* Control de fecha de inicio y vencimiento
-* Detección automática de membresías vencidas
-* Alertas de vencimiento
-
-## Punto de Venta (POS)
-
-Permite vender productos del gimnasio como:
-
-* Suplementos
-* Proteínas
-* Bebidas
-* Ropa deportiva
-* Accesorios
-
-Características:
-
-* Interfaz rápida de venta
-* Historial de ventas
-* Diferentes métodos de pago
-
-## Gestión de Inventario
-
-* Catálogo de productos
-* Control de stock
-* Categorías de productos
-* Gestión de precios
-
-## Reportes y Estadísticas
-
-* Reportes de ventas diarias
-* Ingresos por membresías
-* Ventas por producto
-* Clientes activos y vencidos
-
-## Sistema de Acceso al Gimnasio
-
-* Búsqueda rápida de clientes
-* Check-in mediante código QR
-* Validación de membresía
-* Alertas visuales de membresía activa o vencida
+La primera version estara enfocada en un gimnasio individual, pero la arquitectura se definira desde el inicio para poder escalar a **multi-sucursal** o incluso **multi-gimnasio**.
 
 ---
 
-# Arquitectura del Sistema
-
-RohiPOS utiliza una arquitectura web moderna.
-
-Los usuarios acceden al sistema desde el navegador.
-El frontend se comunica con el backend mediante una **API REST**, y el backend interactúa con la base de datos.
-
----
-
-# Tecnologías Utilizadas
+# Stack Tecnologico
 
 ## Frontend
 
-* React
-* Next.js
-* TailwindCSS
+- `React.js`
+- `Vite`
+- `Tailwind CSS`
+- `React Router`
 
 ## Backend
 
-* Node.js
-* Express.js
-* Prisma ORM
+- `Node.js`
+- `Express.js`
+- `Prisma ORM`
+- `JWT` para autenticacion
 
 ## Base de Datos
 
-* PostgreSQL
+- `PostgreSQL`
 
 ## Infraestructura
 
-* VPS con Ubuntu
-* Docker
-* Nginx
+- `Ubuntu` en VPS
+- `Nginx` como reverse proxy
+- `Docker` y `Docker Compose`
+- `HTTPS` con SSL
+
+## Herramientas recomendadas
+
+- `Git` y `GitHub`
+- `Postman` o `Insomnia`
+- `pgAdmin` o `DBeaver`
+- `Figma` para diseno de interfaces
 
 ---
 
-# Estructura del Proyecto
+# Por que una Aplicacion Web
 
+Elegir una aplicacion web es conveniente para RohiPOS por estas razones:
+
+- Es compatible con laptops Mac sin instalar software local
+- Facilita el soporte remoto y las actualizaciones
+- Permite acceso desde recepcion, caja o dispositivos moviles
+- Centraliza la informacion en una sola base de datos
+- Reduce problemas de versionado entre equipos
+
+---
+
+# Modulos Principales
+
+## 1. Gestion de Clientes
+
+- Registro de clientes
+- Datos personales y de contacto
+- Fotografia de perfil
+- Estado del cliente
+- Historial de membresias y pagos
+
+## 2. Gestion de Membresias
+
+- Creacion de planes
+- Asignacion de membresias a clientes
+- Fecha de inicio y vencimiento
+- Renovaciones
+- Alertas de membresias por vencer o vencidas
+
+## 3. Punto de Venta (POS)
+
+- Venta rapida de productos
+- Carrito de compra
+- Multiples metodos de pago
+- Impresion de comprobante
+- Historial de ventas
+
+## 4. Inventario
+
+- Registro de productos
+- Categorias
+- Stock actual
+- Entradas y salidas de inventario
+- Control de precios y costo
+
+## 5. Caja y Reportes
+
+- Apertura y cierre de caja
+- Ingresos por membresias
+- Ingresos por ventas
+- Reportes diarios, semanales y mensuales
+- Productos mas vendidos
+
+## 6. Control de Acceso
+
+- Busqueda rapida de cliente
+- Check-in
+- Validacion de membresia activa
+- Historial de asistencia
+- Preparado para QR en fases posteriores
+
+## 7. Usuarios y Roles
+
+- Administrador
+- Recepcionista
+- Cajero
+- Permisos por modulo
+
+---
+
+# Arquitectura Propuesta
+
+RohiPOS seguira una arquitectura cliente-servidor:
+
+1. El usuario accede al sistema desde el navegador.
+2. El frontend en `React` consume una API REST construida en `Node.js + Express`.
+3. El backend aplica reglas de negocio, autenticacion y validaciones.
+4. `Prisma` gestiona la comunicacion con `PostgreSQL`.
+5. La aplicacion se despliega en una VPS con `Ubuntu`, `Docker` y `Nginx`.
+
+## Flujo general
+
+```text
+Navegador (Mac/Windows/Tablet)
+        |
+        v
+Frontend React
+        |
+        v
+API REST Node.js + Express
+        |
+        v
+Prisma ORM
+        |
+        v
+PostgreSQL
 ```
-rohi-pos
-│
-├── frontend        # Interfaz web del sistema
-├── backend         # Servidor API REST
-├── database        # Esquema y migraciones de la base de datos
-├── docker          # Configuración de contenedores
-├── docs            # Documentación del proyecto
-└── README.md
+
+---
+
+# Modelo Inicial de Base de Datos
+
+Estas son las entidades base recomendadas para la primera version:
+
+- `users`
+- `roles`
+- `clients`
+- `membership_plans`
+- `memberships`
+- `products`
+- `product_categories`
+- `inventory_movements`
+- `sales`
+- `sale_items`
+- `payments`
+- `cash_register_sessions`
+- `checkins`
+
+## Relaciones clave
+
+- Un cliente puede tener muchas membresias
+- Una membresia pertenece a un plan
+- Una venta tiene muchos items
+- Un producto puede participar en muchas ventas
+- Cada movimiento de inventario afecta a un producto
+- Un pago puede corresponder a una membresia o a una venta
+
+---
+
+# Requisitos Funcionales Iniciales
+
+## MVP del gimnasio
+
+- Registrar clientes
+- Crear planes de membresia
+- Vender membresias
+- Registrar pagos
+- Consultar vencimientos
+- Registrar productos
+- Vender productos en POS
+- Descontar stock automaticamente
+- Generar reportes basicos
+
+## Requisitos no funcionales
+
+- Interfaz rapida y simple para recepcion
+- Seguridad por login y roles
+- Respaldo automatico de base de datos
+- Acceso seguro por HTTPS
+- Buen rendimiento en navegadores modernos
+
+---
+
+# Estructura Sugerida del Proyecto
+
+```text
+rohi-pos/
+|-- frontend/              # Aplicacion React
+|-- backend/               # API REST con Node.js y Express
+|-- database/              # Schema Prisma, migraciones y seeds
+|-- docker/                # Configuracion de contenedores
+|-- docs/                  # Documentacion funcional y tecnica
+`-- README.md
 ```
 
 ---
 
-# Usuarios Objetivo
+# Roadmap de Desarrollo
 
-RohiPOS está diseñado para:
+## Fase 1. Fundacion tecnica
 
-* Gimnasios pequeños y medianos
-* Centros de fitness
-* Estudios de entrenamiento personal
-* Box de CrossFit
+- Definir estructura del monorepo o repositorio unico
+- Configurar frontend, backend y base de datos
+- Configurar Docker y entorno local
+- Definir autenticacion y roles
+
+## Fase 2. Clientes y membresias
+
+- CRUD de clientes
+- CRUD de planes
+- Registro de membresias
+- Pagos y renovaciones
+- Alertas de vencimiento
+
+## Fase 3. POS e inventario
+
+- CRUD de productos
+- Control de stock
+- Registro de ventas
+- Detalle de venta
+- Caja basica
+
+## Fase 4. Reportes y acceso
+
+- Reportes de ingresos
+- Reportes de clientes activos y vencidos
+- Check-in de clientes
+- Historial de asistencia
+
+## Fase 5. Mejoras futuras
+
+- Multi-sucursal
+- App movil
+- Pagos en linea
+- Notificaciones por WhatsApp o correo
+- Codigo QR para acceso
 
 ---
 
-# Funcionalidades Futuras
+# Despliegue Propuesto
 
-En futuras versiones RohiPOS podría incluir:
+## En la VPS
 
-* Soporte para múltiples gimnasios (SaaS)
-* Pagos en línea de membresías
-* Aplicación móvil
-* Estadísticas avanzadas de asistencia
-* Gestión de entrenadores
-* Registro de rutinas de entrenamiento
-* Notificaciones por WhatsApp o correo electrónico
+- `Ubuntu`
+- `Docker Compose`
+- `Nginx`
+- `PostgreSQL`
+- API backend
+- Frontend compilado y servido por `Nginx`
+
+## Consideraciones de produccion
+
+- Configurar dominio y SSL
+- Automatizar backups de PostgreSQL
+- Definir variables de entorno seguras
+- Monitorear uso de disco, memoria y logs
+- Preparar restauracion ante fallos
 
 ---
 
-# Estado del Proyecto
+# Estado Actual
 
-RohiPOS se encuentra actualmente **en desarrollo activo**.
+RohiPOS se encuentra en etapa de definicion y arquitectura inicial.
 
-La primera versión incluirá:
+La meta de la primera entrega es contar con un sistema funcional que incluya:
 
-* Gestión de clientes
-* Control de membresías
-* Sistema POS
-* Gestión de inventario
-* Reportes básicos
+- Gestion de clientes
+- Gestion de membresias
+- Punto de venta
+- Inventario basico
+- Caja y reportes iniciales
+
+---
+
+# Proximos Pasos Recomendados
+
+1. Crear la estructura base de `frontend` y `backend`
+2. Definir el esquema inicial en `PostgreSQL`
+3. Disenar las pantallas principales del sistema
+4. Construir autenticacion y roles
+5. Implementar primero clientes, membresias y POS
 
 ---
 
 # Licencia
 
-Este proyecto se encuentra actualmente en desarrollo y es de uso privado.
+Proyecto privado en desarrollo.
