@@ -23,6 +23,7 @@ const baseProductSelect = `
     p.minimum_stock,
     p.unit_label,
     p.barcode,
+    p.image_url,
     p.is_active,
     p.created_at,
     p.updated_at
@@ -130,10 +131,10 @@ productsRouter.post('/', async (request, response, next) => {
     const result = await query(
       `INSERT INTO products (
          category_id, sku, name, description, sale_price, cost_price, stock_quantity,
-         minimum_stock, unit_label, barcode, is_active
+         minimum_stock, unit_label, barcode, image_url, is_active
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, sku, name, sale_price, stock_quantity, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id, sku, name, sale_price, stock_quantity, image_url, created_at`,
       [
         payload.category_id,
         payload.sku,
@@ -145,6 +146,7 @@ productsRouter.post('/', async (request, response, next) => {
         payload.minimum_stock,
         payload.unit_label,
         payload.barcode,
+        payload.image_url,
         payload.is_active
       ]
     );

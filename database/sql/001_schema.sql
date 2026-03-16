@@ -126,6 +126,7 @@ CREATE TABLE products (
     minimum_stock NUMERIC(12, 2) NOT NULL DEFAULT 0,
     unit_label VARCHAR(20) NOT NULL DEFAULT 'unit',
     barcode VARCHAR(100),
+    image_url TEXT,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

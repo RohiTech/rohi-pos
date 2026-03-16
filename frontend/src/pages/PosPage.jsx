@@ -35,6 +35,7 @@ const initialProductForm = {
   minimum_stock: '',
   unit_label: 'unidad',
   barcode: '',
+  image_url: '',
   is_active: true
 };
 
@@ -285,6 +286,7 @@ export function PosPage() {
         minimum_stock: productForm.minimum_stock === '' ? 0 : Number(productForm.minimum_stock),
         unit_label: productForm.unit_label || 'unidad',
         barcode: productForm.barcode || null,
+        image_url: productForm.image_url || null,
         is_active: productForm.is_active
       });
 
@@ -608,6 +610,50 @@ export function PosPage() {
 
   const selectedTicketItem = ticketItems[selectedLineIndex];
 
+  useEffect(() => {
+    function handleKeydown(event) {
+      const targetTag = event.target?.tagName;
+      const isTypingInField =
+        targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT' || event.target?.isContentEditable;
+
+      if (activeView !== 'sales' || isTypingInField) {
+        return;
+      }
+
+      if (/^[0-9]$/.test(event.key)) {
+        event.preventDefault();
+        applyKeypad(event.key);
+        return;
+      }
+
+      if (event.key === '.') {
+        event.preventDefault();
+        applyKeypad('.');
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        applyKeypad('backspace');
+        return;
+      }
+
+      if (event.key === 'Delete') {
+        event.preventDefault();
+        applyKeypad('clear');
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        setAmountTendered(String(ticketTotal));
+      }
+    }
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [activeView, ticketTotal, keypadTarget, selectedLineIndex, saleForm.items]);
+
   return (
     <div>
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
@@ -657,7 +703,7 @@ export function PosPage() {
           onClick={() => setActiveView('stats')}
           type="button"
         >
-          Informacion estadistica
+          Historial ventas
         </button>
       </div>
 
@@ -916,12 +962,28 @@ export function PosPage() {
                       onClick={() => addProductToTicket(product)}
                       type="button"
                     >
-                      <div className={`h-24 bg-gradient-to-br ${getCategoryTone(categoryIndex >= 0 ? categoryIndex : index)} p-4 text-white`}>
-                        <p className="text-xs uppercase tracking-[0.18em] text-white/70">
-                          {product.category_name || 'Mostrador'}
-                        </p>
-                        <p className="mt-3 text-lg font-semibold">{product.name}</p>
-                      </div>
+                      {product.image_url ? (
+                        <div className="relative h-28">
+                          <img
+                            alt={product.name}
+                            className="h-full w-full object-cover"
+                            src={product.image_url}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-brand-forest/85 via-brand-forest/45 to-transparent p-4 text-white">
+                            <p className="text-xs uppercase tracking-[0.18em] text-white/70">
+                              {product.category_name || 'Mostrador'}
+                            </p>
+                            <p className="mt-3 text-lg font-semibold">{product.name}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`h-24 bg-gradient-to-br ${getCategoryTone(categoryIndex >= 0 ? categoryIndex : index)} p-4 text-white`}>
+                          <p className="text-xs uppercase tracking-[0.18em] text-white/70">
+                            {product.category_name || 'Mostrador'}
+                          </p>
+                          <p className="mt-3 text-lg font-semibold">{product.name}</p>
+                        </div>
+                      )}
                       <div className="grid gap-3 p-4">
                         <div className="flex items-center justify-between">
                           <span className="text-xs uppercase tracking-[0.14em] text-brand-moss">
@@ -1261,6 +1323,27 @@ export function PosPage() {
               </div>
 
               <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">URL de imagen</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  name="image_url"
+                  onChange={handleProductChange}
+                  placeholder="https://..."
+                  value={productForm.image_url}
+                />
+              </label>
+
+              {productForm.image_url ? (
+                <div className="overflow-hidden rounded-[1.5rem] border border-brand-sand/70 bg-brand-cream/30">
+                  <img
+                    alt="Vista previa del producto"
+                    className="h-40 w-full object-cover"
+                    src={productForm.image_url}
+                  />
+                </div>
+              ) : null}
+
+              <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Nombre</span>
                 <input
                   className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
@@ -1385,6 +1468,13 @@ export function PosPage() {
               <div className="space-y-3">
                 {paginatedProducts.map((product) => (
                   <article key={product.id} className="rounded-2xl border border-brand-sand/70 p-4">
+                    {product.image_url ? (
+                      <img
+                        alt={product.name}
+                        className="mb-4 h-44 w-full rounded-[1.5rem] object-cover"
+                        src={product.image_url}
+                      />
+                    ) : null}
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">{product.sku}</p>

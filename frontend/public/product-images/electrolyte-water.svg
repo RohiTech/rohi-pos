@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f7f2e8"/>
+  <path d="M175 118h50l18 42v200c0 28-24 52-52 52h-8c-28 0-52-24-52-52V160z" fill="#d5efe4"/>
+  <rect x="154" y="176" width="90" height="130" rx="18" fill="#4c8c63"/>
+  <path d="M199 202c22 31 42 49 42 72a42 42 0 1 1-84 0c0-23 20-41 42-72z" fill="#f7f2e8"/>
+  <rect x="350" y="175" width="280" height="30" rx="15" fill="#173b30"/>
+  <rect x="350" y="228" width="226" height="22" rx="11" fill="#4c8c63"/>
+  <rect x="350" y="267" width="160" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="44" font-weight="700" text-anchor="middle">Electrolyte Water</text>
+</svg>

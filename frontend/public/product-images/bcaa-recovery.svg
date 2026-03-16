@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f7f2e8"/>
+  <rect x="110" y="140" width="180" height="235" rx="28" fill="#4c8c63"/>
+  <rect x="145" y="118" width="110" height="42" rx="16" fill="#173b30"/>
+  <rect x="135" y="205" width="130" height="90" rx="18" fill="#f7f2e8"/>
+  <path d="M200 225l18 30h-36z" fill="#c96b49"/>
+  <rect x="350" y="175" width="270" height="30" rx="15" fill="#173b30"/>
+  <rect x="350" y="228" width="230" height="22" rx="11" fill="#4c8c63"/>
+  <rect x="350" y="267" width="160" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="48" font-weight="700" text-anchor="middle">BCAA Recovery</text>
+</svg>

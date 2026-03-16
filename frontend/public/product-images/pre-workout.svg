@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f3ebdb"/>
+  <polygon points="175,120 260,120 300,205 240,390 135,390 95,205" fill="#c96b49"/>
+  <rect x="115" y="215" width="160" height="72" rx="18" fill="#173b30"/>
+  <rect x="355" y="170" width="290" height="30" rx="15" fill="#173b30"/>
+  <rect x="355" y="225" width="240" height="22" rx="11" fill="#4c8c63"/>
+  <rect x="355" y="264" width="175" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="48" font-weight="700" text-anchor="middle">Pre Workout</text>
+</svg>

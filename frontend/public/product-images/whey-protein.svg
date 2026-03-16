@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f7f2e8"/>
+  <rect x="110" y="120" width="180" height="250" rx="32" fill="#173b30"/>
+  <rect x="132" y="165" width="136" height="118" rx="20" fill="#4c8c63"/>
+  <circle cx="200" cy="224" r="34" fill="#f7f2e8"/>
+  <rect x="340" y="170" width="280" height="32" rx="16" fill="#173b30"/>
+  <rect x="340" y="225" width="215" height="22" rx="11" fill="#c96b49"/>
+  <rect x="340" y="264" width="180" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="48" font-weight="700" text-anchor="middle">Whey Protein</text>
+</svg>

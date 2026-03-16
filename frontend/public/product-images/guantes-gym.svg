@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f3ebdb"/>
+  <path d="M190 165c22-20 54-10 66 18l26 62 32-72c14-30 56-28 67 3l22 66 32-48c19-28 62-18 67 16l10 80c10 77-48 150-125 150H275c-64 0-119-47-129-111l-14-92c-6-32 10-62 38-72 9-3 16-4 20-4z" fill="#c96b49"/>
+  <rect x="115" y="324" width="190" height="62" rx="24" fill="#173b30"/>
+  <rect x="360" y="180" width="270" height="30" rx="15" fill="#173b30"/>
+  <rect x="360" y="232" width="210" height="22" rx="11" fill="#4c8c63"/>
+  <rect x="360" y="272" width="160" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="48" font-weight="700" text-anchor="middle">Guantes de Gym</text>
+</svg>

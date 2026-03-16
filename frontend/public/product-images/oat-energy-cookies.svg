@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
+  <rect width="800" height="520" fill="#f7f2e8"/>
+  <circle cx="180" cy="250" r="92" fill="#c96b49"/>
+  <circle cx="240" cy="285" r="74" fill="#d99873"/>
+  <circle cx="155" cy="225" r="10" fill="#173b30"/>
+  <circle cx="214" cy="248" r="10" fill="#173b30"/>
+  <circle cx="235" cy="305" r="10" fill="#173b30"/>
+  <rect x="355" y="175" width="280" height="30" rx="15" fill="#173b30"/>
+  <rect x="355" y="228" width="220" height="22" rx="11" fill="#4c8c63"/>
+  <rect x="355" y="267" width="160" height="22" rx="11" fill="#e8d8bc"/>
+  <text x="400" y="84" fill="#173b30" font-family="Trebuchet MS, sans-serif" font-size="44" font-weight="700" text-anchor="middle">Oat Energy Cookies</text>
+</svg>

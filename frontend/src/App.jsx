@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { DashboardPage } from './pages/DashboardPage';
 import { ClientsPage } from './pages/ClientsPage';
 import { LoginPage } from './pages/LoginPage';
@@ -16,7 +17,14 @@ export function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/memberships" element={<MembershipsPage />} />
-          <Route path="/pos" element={<PosPage />} />
+          <Route
+            path="/pos"
+            element={
+              <RouteErrorBoundary>
+                <PosPage />
+              </RouteErrorBoundary>
+            }
+          />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
