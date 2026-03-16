@@ -1,0 +1,2 @@
+RohiPOS API listening on port 3001
+Connected to PostgreSQL database "rohipos" as "postgres"
