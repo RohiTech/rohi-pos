@@ -25,6 +25,14 @@ app.use((request, response) => {
 });
 
 app.use((error, _request, response, _next) => {
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    response.status(400).json({
+      ok: false,
+      message: 'La imagen no debe superar 5 MB'
+    });
+    return;
+  }
+
   const statusCode = error.statusCode || 500;
 
   response.status(statusCode).json({

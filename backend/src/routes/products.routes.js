@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { query, withTransaction } from '../config/db.js';
+import { buildProductImageDataUrl, optimizeProductImage } from '../lib/product-images.js';
 import { createHttpError, parsePositiveInteger } from '../utils/http.js';
 import {
   validateCreateProductPayload,
@@ -8,6 +10,12 @@ import {
 } from '../utils/pos.js';
 
 const productsRouter = Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024
+  }
+});
 
 const baseProductSelect = `
   SELECT
@@ -23,13 +31,26 @@ const baseProductSelect = `
     p.minimum_stock,
     p.unit_label,
     p.barcode,
-    p.image_url,
+    p.image_blob,
+    p.image_mime_type,
+    p.image_size_bytes,
     p.is_active,
     p.created_at,
     p.updated_at
   FROM products p
   LEFT JOIN product_categories pc ON pc.id = p.category_id
 `;
+
+function mapProductRow(row) {
+  const image_data_url = buildProductImageDataUrl(row);
+
+  return {
+    ...row,
+    has_image: Boolean(row.image_blob),
+    image_data_url,
+    image_blob: undefined
+  };
+}
 
 function mapPostgresError(error) {
   if (error.code === '23505') {
@@ -81,7 +102,7 @@ productsRouter.get('/', async (request, response, next) => {
       params
     );
 
-    response.json({ ok: true, count: result.rowCount, data: result.rows });
+    response.json({ ok: true, count: result.rowCount, data: result.rows.map(mapProductRow) });
   } catch (error) {
     next(error);
   }
@@ -118,23 +139,24 @@ productsRouter.get('/:id', async (request, response, next) => {
       throw createHttpError(404, 'Product not found');
     }
 
-    response.json({ ok: true, data: result.rows[0] });
+    response.json({ ok: true, data: mapProductRow(result.rows[0]) });
   } catch (error) {
     next(error);
   }
 });
 
-productsRouter.post('/', async (request, response, next) => {
+productsRouter.post('/', upload.single('image'), async (request, response, next) => {
   try {
     const payload = validateCreateProductPayload(request.body);
+    const optimizedImage = await optimizeProductImage(request.file);
 
     const result = await query(
       `INSERT INTO products (
          category_id, sku, name, description, sale_price, cost_price, stock_quantity,
-         minimum_stock, unit_label, barcode, image_url, is_active
+         minimum_stock, unit_label, barcode, image_blob, image_mime_type, image_size_bytes, is_active
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING id, sku, name, sale_price, stock_quantity, image_url, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id, sku, name, sale_price, stock_quantity, image_blob, image_mime_type, image_size_bytes, created_at`,
       [
         payload.category_id,
         payload.sku,
@@ -146,7 +168,9 @@ productsRouter.post('/', async (request, response, next) => {
         payload.minimum_stock,
         payload.unit_label,
         payload.barcode,
-        payload.image_url,
+        optimizedImage?.image_blob ?? null,
+        optimizedImage?.image_mime_type ?? null,
+        optimizedImage?.image_size_bytes ?? null,
         payload.is_active
       ]
     );
@@ -154,7 +178,7 @@ productsRouter.post('/', async (request, response, next) => {
     response.status(201).json({
       ok: true,
       message: 'Product created successfully',
-      data: result.rows[0]
+      data: mapProductRow(result.rows[0])
     });
   } catch (error) {
     try {
@@ -168,7 +192,7 @@ productsRouter.post('/', async (request, response, next) => {
   }
 });
 
-productsRouter.put('/:id', async (request, response, next) => {
+productsRouter.put('/:id', upload.single('image'), async (request, response, next) => {
   try {
     const productId = parsePositiveInteger(request.params.id);
 
@@ -177,6 +201,20 @@ productsRouter.put('/:id', async (request, response, next) => {
     }
 
     const updates = validateUpdateProductPayload(request.body);
+    const optimizedImage = await optimizeProductImage(request.file);
+
+    if (optimizedImage) {
+      updates.image_blob = optimizedImage.image_blob;
+      updates.image_mime_type = optimizedImage.image_mime_type;
+      updates.image_size_bytes = optimizedImage.image_size_bytes;
+    }
+
+    if (request.body.remove_image === 'true') {
+      updates.image_blob = null;
+      updates.image_mime_type = null;
+      updates.image_size_bytes = null;
+    }
+
     const keys = Object.keys(updates);
     const setClauses = keys.map((key, index) => `${key} = $${index + 1}`);
     const values = keys.map((key) => updates[key]);
@@ -185,7 +223,7 @@ productsRouter.put('/:id', async (request, response, next) => {
       `UPDATE products
        SET ${setClauses.join(', ')}
        WHERE id = $${keys.length + 1}
-       RETURNING id, sku, name, sale_price, stock_quantity, updated_at`,
+       RETURNING id, sku, name, sale_price, stock_quantity, image_blob, image_mime_type, image_size_bytes, updated_at`,
       [...values, productId]
     );
 
@@ -196,7 +234,7 @@ productsRouter.put('/:id', async (request, response, next) => {
     response.json({
       ok: true,
       message: 'Product updated successfully',
-      data: result.rows[0]
+      data: mapProductRow(result.rows[0])
     });
   } catch (error) {
     try {

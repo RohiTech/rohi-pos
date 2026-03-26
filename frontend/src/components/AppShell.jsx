@@ -6,7 +6,8 @@ const navigation = [
   { to: '/', label: 'Dashboard', shortLabel: 'DB' },
   { to: '/clients', label: 'Clientes', shortLabel: 'CL' },
   { to: '/memberships', label: 'Membresias', shortLabel: 'MB' },
-  { to: '/pos', label: 'POS', shortLabel: 'POS' }
+  { to: '/pos', label: 'POS', shortLabel: 'POS' },
+  { to: '/settings', label: 'Configuracion', shortLabel: 'CFG' }
 ];
 
 const sidebarStorageKey = 'rohipos_sidebar_collapsed';

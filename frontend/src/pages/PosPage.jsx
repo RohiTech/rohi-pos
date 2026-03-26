@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiPostForm, apiPutForm } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const PRODUCT_PAGE_SIZE = 6;
@@ -35,7 +35,7 @@ const initialProductForm = {
   minimum_stock: '',
   unit_label: 'unidad',
   barcode: '',
-  image_url: '',
+  image_file: null,
   is_active: true
 };
 
@@ -131,6 +131,9 @@ export function PosPage() {
     return storedValue === null ? true : storedValue === 'true';
   });
   const [productForm, setProductForm] = useState(initialProductForm);
+  const [productImagePreview, setProductImagePreview] = useState('');
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [removeProductImage, setRemoveProductImage] = useState(false);
   const [inventoryForm, setInventoryForm] = useState(initialInventoryForm);
   const [saleForm, setSaleForm] = useState(initialSaleForm);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -218,6 +221,65 @@ export function PosPage() {
     }));
   }
 
+  function handleProductImageChange(event) {
+    const file = event.target.files?.[0] || null;
+
+    setProductForm((current) => ({
+      ...current,
+      image_file: file
+    }));
+    setRemoveProductImage(false);
+
+    if (!file) {
+      setProductImagePreview('');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProductImagePreview(typeof reader.result === 'string' ? reader.result : '');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function resetProductForm() {
+    setEditingProductId(null);
+    setRemoveProductImage(false);
+    setProductForm(initialProductForm);
+    setProductImagePreview('');
+  }
+
+  function startEditProduct(product) {
+    setEditingProductId(product.id);
+    setRemoveProductImage(false);
+    setProductForm({
+      category_id: product.category_id ? String(product.category_id) : '',
+      sku: product.sku || '',
+      name: product.name || '',
+      description: product.description || '',
+      sale_price: String(product.sale_price || ''),
+      cost_price: String(product.cost_price || ''),
+      stock_quantity: String(product.stock_quantity || ''),
+      minimum_stock: String(product.minimum_stock || ''),
+      unit_label: product.unit_label || 'unidad',
+      barcode: product.barcode || '',
+      image_file: null,
+      is_active: Boolean(product.is_active)
+    });
+    setProductImagePreview(product.image_data_url || '');
+    setActiveView('products');
+    clearMessages();
+  }
+
+  function clearProductImage() {
+    setProductForm((current) => ({
+      ...current,
+      image_file: null
+    }));
+    setProductImagePreview('');
+    setRemoveProductImage(true);
+  }
+
   function handleInventoryChange(event) {
     const { name, value } = event.target;
     setInventoryForm((current) => ({
@@ -275,25 +337,51 @@ export function PosPage() {
     setSavingProduct(true);
 
     try {
-      await apiPost('/products', {
-        category_id: Number(productForm.category_id),
-        sku: productForm.sku,
-        name: productForm.name,
-        description: productForm.description || null,
-        sale_price: Number(productForm.sale_price),
-        cost_price: productForm.cost_price === '' ? 0 : Number(productForm.cost_price),
-        stock_quantity: productForm.stock_quantity === '' ? 0 : Number(productForm.stock_quantity),
-        minimum_stock: productForm.minimum_stock === '' ? 0 : Number(productForm.minimum_stock),
-        unit_label: productForm.unit_label || 'unidad',
-        barcode: productForm.barcode || null,
-        image_url: productForm.image_url || null,
-        is_active: productForm.is_active
-      });
+      const formData = new FormData();
+      formData.set('category_id', productForm.category_id);
+      formData.set('sku', productForm.sku);
+      formData.set('name', productForm.name);
+      formData.set('description', productForm.description || '');
+      formData.set('sale_price', String(Number(productForm.sale_price)));
+      formData.set(
+        'cost_price',
+        String(productForm.cost_price === '' ? 0 : Number(productForm.cost_price))
+      );
+      formData.set(
+        'stock_quantity',
+        String(productForm.stock_quantity === '' ? 0 : Number(productForm.stock_quantity))
+      );
+      formData.set(
+        'minimum_stock',
+        String(productForm.minimum_stock === '' ? 0 : Number(productForm.minimum_stock))
+      );
+      formData.set('unit_label', productForm.unit_label || 'unidad');
+      formData.set('barcode', productForm.barcode || '');
+      formData.set('is_active', String(productForm.is_active));
 
-      setProductForm(initialProductForm);
-      triggerRefresh('Producto creado correctamente.');
+      if (productForm.image_file) {
+        formData.set('image', productForm.image_file);
+      }
+
+      if (editingProductId) {
+        if (removeProductImage) {
+          formData.set('remove_image', 'true');
+        }
+
+        await apiPutForm(`/products/${editingProductId}`, formData);
+      } else {
+        await apiPostForm('/products', formData);
+      }
+
+      resetProductForm();
+      triggerRefresh(
+        editingProductId ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.'
+      );
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible crear el producto');
+      setError(
+        requestError.message ||
+          (editingProductId ? 'No fue posible actualizar el producto' : 'No fue posible crear el producto')
+      );
     } finally {
       setSavingProduct(false);
     }
@@ -962,12 +1050,12 @@ export function PosPage() {
                       onClick={() => addProductToTicket(product)}
                       type="button"
                     >
-                      {product.image_url ? (
+                      {product.image_data_url ? (
                         <div className="relative h-28">
                           <img
                             alt={product.name}
                             className="h-full w-full object-cover"
-                            src={product.image_url}
+                            src={product.image_data_url}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-brand-forest/85 via-brand-forest/45 to-transparent p-4 text-white">
                             <p className="text-xs uppercase tracking-[0.18em] text-white/70">
@@ -1280,7 +1368,10 @@ export function PosPage() {
 
       {activeView === 'products' ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-          <DataPanel title="Nuevo producto" subtitle="Registra articulos para el mostrador y el POS.">
+          <DataPanel
+            title={editingProductId ? 'Editar producto' : 'Nuevo producto'}
+            subtitle="Registra articulos para el mostrador y el POS."
+          >
             <form className="grid gap-4" onSubmit={handleCreateProduct}>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Categoria</span>
@@ -1323,23 +1414,31 @@ export function PosPage() {
               </div>
 
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-brand-forest">URL de imagen</span>
+                <span className="text-sm font-semibold text-brand-forest">Imagen del producto</span>
                 <input
+                  accept="image/png,image/jpeg,image/webp"
                   className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                  name="image_url"
-                  onChange={handleProductChange}
-                  placeholder="https://..."
-                  value={productForm.image_url}
+                  onChange={handleProductImageChange}
+                  type="file"
                 />
               </label>
 
-              {productForm.image_url ? (
-                <div className="overflow-hidden rounded-[1.5rem] border border-brand-sand/70 bg-brand-cream/30">
-                  <img
-                    alt="Vista previa del producto"
-                    className="h-40 w-full object-cover"
-                    src={productForm.image_url}
-                  />
+              {productImagePreview ? (
+                <div className="space-y-3">
+                  <div className="overflow-hidden rounded-[1.5rem] border border-brand-sand/70 bg-brand-cream/30">
+                    <img
+                      alt="Vista previa del producto"
+                      className="h-40 w-full object-cover"
+                      src={productImagePreview}
+                    />
+                  </div>
+                  <button
+                    className="rounded-2xl border border-rose-200 px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-rose-600"
+                    onClick={clearProductImage}
+                    type="button"
+                  >
+                    Quitar imagen
+                  </button>
                 </div>
               ) : null}
 
@@ -1436,13 +1535,26 @@ export function PosPage() {
                 Producto activo
               </label>
 
-              <button
-                className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
-                disabled={savingProduct || categoriesQuery.loading}
-                type="submit"
-              >
-                {savingProduct ? 'Guardando...' : 'Crear producto'}
-              </button>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                  disabled={savingProduct || categoriesQuery.loading}
+                  type="submit"
+                >
+                  {savingProduct
+                    ? 'Guardando...'
+                    : editingProductId
+                      ? 'Actualizar producto'
+                      : 'Crear producto'}
+                </button>
+                <button
+                  className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-brand-forest"
+                  onClick={resetProductForm}
+                  type="button"
+                >
+                  Limpiar
+                </button>
+              </div>
             </form>
           </DataPanel>
 
@@ -1468,11 +1580,11 @@ export function PosPage() {
               <div className="space-y-3">
                 {paginatedProducts.map((product) => (
                   <article key={product.id} className="rounded-2xl border border-brand-sand/70 p-4">
-                    {product.image_url ? (
+                    {product.image_data_url ? (
                       <img
                         alt={product.name}
                         className="mb-4 h-44 w-full rounded-[1.5rem] object-cover"
-                        src={product.image_url}
+                        src={product.image_data_url}
                       />
                     ) : null}
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1508,6 +1620,15 @@ export function PosPage() {
                         <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Estado</p>
                         <p className="mt-1">{product.is_active ? 'Activo' : 'Inactivo'}</p>
                       </div>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest"
+                        onClick={() => startEditProduct(product)}
+                        type="button"
+                      >
+                        Editar
+                      </button>
                     </div>
                   </article>
                 ))}

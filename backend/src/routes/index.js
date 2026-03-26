@@ -8,6 +8,7 @@ import { membershipsRouter } from './memberships.routes.js';
 import { productCategoriesRouter } from './product-categories.routes.js';
 import { productsRouter } from './products.routes.js';
 import { salesRouter } from './sales.routes.js';
+import { settingsRouter } from './settings.routes.js';
 
 const apiRouter = Router();
 
@@ -17,6 +18,7 @@ apiRouter.use(authenticateRequest);
 apiRouter.use('/clients', clientsRouter);
 apiRouter.use('/membership-plans', membershipPlansRouter);
 apiRouter.use('/memberships', membershipsRouter);
+apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/product-categories', productCategoriesRouter);
 apiRouter.use('/products', productsRouter);
 apiRouter.use('/sales', salesRouter);

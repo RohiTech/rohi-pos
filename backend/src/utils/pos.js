@@ -151,14 +151,13 @@ export function validateCreateProductPayload(payload) {
     minimum_stock: normalizeNonNegativeNumber(payload.minimum_stock, 'minimum_stock', false) ?? 0,
     unit_label: normalizeNullableString(payload.unit_label) || 'unit',
     barcode: normalizeNullableString(payload.barcode),
-    image_url: normalizeNullableString(payload.image_url),
     is_active: normalizeBoolean(payload.is_active, true)
   };
 }
 
 export function validateUpdateProductPayload(payload) {
   const updates = {};
-  const textFields = ['sku', 'name', 'description', 'unit_label', 'barcode', 'image_url'];
+  const textFields = ['sku', 'name', 'description', 'unit_label', 'barcode'];
 
   for (const field of textFields) {
     if (field in payload) {

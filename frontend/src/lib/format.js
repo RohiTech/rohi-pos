@@ -1,9 +1,22 @@
+let activeCurrencyCode = 'USD';
+let activeLocale = 'es-NI';
+
+export function setCurrencyFormatterOptions(options = {}) {
+  if (options.currency) {
+    activeCurrencyCode = options.currency;
+  }
+
+  if (options.locale) {
+    activeLocale = options.locale;
+  }
+}
+
 export function formatCurrency(value) {
   const numericValue = Number(value || 0);
 
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(activeLocale, {
     style: 'currency',
-    currency: 'USD'
+    currency: activeCurrencyCode
   }).format(numericValue);
 }
 

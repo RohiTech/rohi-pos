@@ -43,6 +43,20 @@ export async function apiPost(path, payload) {
   return handleResponse(response);
 }
 
+export async function apiPostForm(path, formData) {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers: authToken
+      ? {
+          Authorization: `Bearer ${authToken}`
+        }
+      : {},
+    body: formData
+  });
+
+  return handleResponse(response);
+}
+
 export async function apiPut(path, payload) {
   const response = await fetch(`${API_URL}${path}`, {
     method: 'PUT',
@@ -55,6 +69,20 @@ export async function apiPut(path, payload) {
         : {})
     },
     body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function apiPutForm(path, formData) {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'PUT',
+    headers: authToken
+      ? {
+          Authorization: `Bearer ${authToken}`
+        }
+      : {},
+    body: formData
   });
 
   return handleResponse(response);
