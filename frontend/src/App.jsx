@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
+import { AttendancePage } from './pages/AttendancePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ClientsPage } from './pages/ClientsPage';
 import { LoginPage } from './pages/LoginPage';
@@ -16,6 +17,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/memberships" element={<MembershipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

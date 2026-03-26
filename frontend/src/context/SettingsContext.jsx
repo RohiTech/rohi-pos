@@ -8,7 +8,8 @@ const SettingsContext = createContext(null);
 export function SettingsProvider({ children }) {
   const { isAuthenticated } = useAuth();
   const [settings, setSettings] = useState({
-    currency_code: 'USD'
+    currency_code: 'USD',
+    membership_expiry_alert_days: 3
   });
   const [loading, setLoading] = useState(false);
 
@@ -22,7 +23,7 @@ export function SettingsProvider({ children }) {
   useEffect(() => {
     async function loadSettings() {
       if (!isAuthenticated) {
-        setSettings({ currency_code: 'USD' });
+        setSettings({ currency_code: 'USD', membership_expiry_alert_days: 3 });
         setLoading(false);
         return;
       }
@@ -32,10 +33,11 @@ export function SettingsProvider({ children }) {
       try {
         const response = await apiGet('/settings');
         setSettings({
-          currency_code: response.data.currency_code || 'USD'
+          currency_code: response.data.currency_code || 'USD',
+          membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3)
         });
       } catch (_error) {
-        setSettings({ currency_code: 'USD' });
+        setSettings({ currency_code: 'USD', membership_expiry_alert_days: 3 });
       } finally {
         setLoading(false);
       }
@@ -47,7 +49,8 @@ export function SettingsProvider({ children }) {
   async function updateSettings(nextSettings) {
     const response = await apiPut('/settings', nextSettings);
     setSettings({
-      currency_code: response.data.currency_code || 'USD'
+      currency_code: response.data.currency_code || 'USD',
+      membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3)
     });
     return response.data;
   }

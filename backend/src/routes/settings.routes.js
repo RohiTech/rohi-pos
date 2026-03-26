@@ -9,7 +9,7 @@ async function getSettingsMap() {
   const result = await query(
     `SELECT setting_key, setting_value
      FROM system_settings
-     WHERE setting_key IN ('currency_code')
+     WHERE setting_key IN ('currency_code', 'membership_expiry_alert_days')
      ORDER BY setting_key ASC`
   );
 
@@ -23,7 +23,8 @@ settingsRouter.get('/', async (_request, response, next) => {
     response.json({
       ok: true,
       data: {
-        currency_code: settings.currency_code || 'USD'
+        currency_code: settings.currency_code || 'USD',
+        membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3)
       }
     });
   } catch (error) {
@@ -36,6 +37,7 @@ settingsRouter.put('/', async (request, response, next) => {
     const currencyCode = String(request.body.currency_code || '')
       .trim()
       .toUpperCase();
+    const alertDays = Number.parseInt(request.body.membership_expiry_alert_days, 10);
 
     if (!currencyCode) {
       throw createHttpError(400, 'currency_code is required');
@@ -43,6 +45,10 @@ settingsRouter.put('/', async (request, response, next) => {
 
     if (!ALLOWED_CURRENCIES.has(currencyCode)) {
       throw createHttpError(400, 'currency_code is invalid');
+    }
+
+    if (!Number.isInteger(alertDays) || alertDays < 0 || alertDays > 30) {
+      throw createHttpError(400, 'membership_expiry_alert_days must be between 0 and 30');
     }
 
     await query(
@@ -53,11 +59,24 @@ settingsRouter.put('/', async (request, response, next) => {
       [currencyCode]
     );
 
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description)
+       VALUES (
+         'membership_expiry_alert_days',
+         $1,
+         'Dias de anticipacion para avisar vencimiento de membresia'
+       )
+       ON CONFLICT (setting_key)
+       DO UPDATE SET setting_value = EXCLUDED.setting_value`,
+      [String(alertDays)]
+    );
+
     response.json({
       ok: true,
       message: 'Settings updated successfully',
       data: {
-        currency_code: currencyCode
+        currency_code: currencyCode,
+        membership_expiry_alert_days: alertDays
       }
     });
   } catch (error) {

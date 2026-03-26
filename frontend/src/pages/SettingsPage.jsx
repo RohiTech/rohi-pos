@@ -15,13 +15,15 @@ const currencyOptions = [
 export function SettingsPage() {
   const { settings, loading, updateSettings } = useSettings();
   const [currencyCode, setCurrencyCode] = useState(settings.currency_code || 'USD');
+  const [alertDays, setAlertDays] = useState(settings.membership_expiry_alert_days || 3);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     setCurrencyCode(settings.currency_code || 'USD');
-  }, [settings.currency_code]);
+    setAlertDays(settings.membership_expiry_alert_days || 3);
+  }, [settings.currency_code, settings.membership_expiry_alert_days]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -30,7 +32,10 @@ export function SettingsPage() {
     setError('');
 
     try {
-      await updateSettings({ currency_code: currencyCode });
+      await updateSettings({
+        currency_code: currencyCode,
+        membership_expiry_alert_days: Number(alertDays)
+      });
       setMessage('Configuracion guardada correctamente.');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible guardar la configuracion');
@@ -66,6 +71,20 @@ export function SettingsPage() {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-sm font-semibold text-brand-forest">
+                Dias de aviso antes del vencimiento
+              </span>
+              <input
+                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                max="30"
+                min="0"
+                onChange={(event) => setAlertDays(event.target.value)}
+                type="number"
+                value={alertDays}
+              />
             </label>
 
             <button
