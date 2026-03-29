@@ -31,6 +31,12 @@ async function ensureClientExists(clientId) {
   return result.rows[0];
 }
 
+function ensureClientIsActive(client) {
+  if (!client.is_active) {
+    throw createHttpError(409, 'El cliente esta inactivo y no puede marcar asistencia.');
+  }
+}
+
 async function ensureUserExists(userId) {
   const result = await query('SELECT id FROM users WHERE id = $1', [userId]);
 
@@ -43,14 +49,15 @@ async function getSystemSettings() {
   const result = await query(
     `SELECT setting_key, setting_value
      FROM system_settings
-     WHERE setting_key IN ('currency_code', 'membership_expiry_alert_days')`
+     WHERE setting_key IN ('currency_code', 'membership_expiry_alert_days', 'routine_price')`
   );
 
   const settings = Object.fromEntries(result.rows.map((row) => [row.setting_key, row.setting_value]));
 
   return {
-    currency_code: settings.currency_code || 'USD',
-    membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3)
+    currency_code: settings.currency_code || 'NIO',
+    membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3),
+    routine_price: Number(settings.routine_price || 0)
   };
 }
 
@@ -243,6 +250,7 @@ attendanceRouter.post('/checkins', async (request, response, next) => {
     }
 
     const client = await ensureClientExists(clientId);
+    ensureClientIsActive(client);
     await ensureUserExists(checkedInByUserId);
     const settings = await getSystemSettings();
 

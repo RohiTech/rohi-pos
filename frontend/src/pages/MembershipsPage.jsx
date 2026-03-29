@@ -19,6 +19,7 @@ const initialMembershipForm = {
   client_id: '',
   plan_id: '',
   membership_number: '',
+  price: '',
   start_date: '',
   end_date: '',
   discount: '',
@@ -28,6 +29,19 @@ const initialMembershipForm = {
 
 const PLAN_PAGE_SIZE = 6;
 const MEMBERSHIP_PAGE_SIZE = 6;
+
+function formatDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateValue, daysToAdd) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  date.setDate(date.getDate() + daysToAdd);
+  return formatDateInput(date);
+}
 
 export function MembershipsPage() {
   const [activeView, setActiveView] = useState('membership-list');
@@ -93,10 +107,35 @@ export function MembershipsPage() {
 
   function handleMembershipChange(event) {
     const { name, value } = event.target;
-    setMembershipForm((current) => ({
-      ...current,
-      [name]: value
-    }));
+    setMembershipForm((current) => {
+      const nextForm = {
+        ...current,
+        [name]: value
+      };
+
+      if (!editingMembershipId && name === 'plan_id') {
+        const selectedPlan = plans.find((plan) => String(plan.id) === value);
+
+        if (selectedPlan) {
+          const startDate = current.start_date || formatDateInput(new Date());
+          nextForm.start_date = startDate;
+          nextForm.end_date = addDays(startDate, Number(selectedPlan.duration_days) - 1);
+          nextForm.price = String(selectedPlan.price ?? '');
+        } else {
+          nextForm.price = '';
+        }
+      }
+
+      if (!editingMembershipId && name === 'start_date' && current.plan_id) {
+        const selectedPlan = plans.find((plan) => String(plan.id) === String(current.plan_id));
+
+        if (selectedPlan && value) {
+          nextForm.end_date = addDays(value, Number(selectedPlan.duration_days) - 1);
+        }
+      }
+
+      return nextForm;
+    });
   }
 
   function resetPlanForm() {
@@ -129,6 +168,7 @@ export function MembershipsPage() {
       client_id: String(membership.client_id || ''),
       plan_id: String(membership.plan_id || ''),
       membership_number: membership.membership_number || '',
+      price: String(membership.price || ''),
       start_date: membership.start_date ? String(membership.start_date).slice(0, 10) : '',
       end_date: membership.end_date ? String(membership.end_date).slice(0, 10) : '',
       discount: String(membership.discount || ''),
@@ -176,6 +216,7 @@ export function MembershipsPage() {
       if (editingMembershipId) {
         await apiPut(`/memberships/${editingMembershipId}`, {
           membership_number: membershipForm.membership_number || null,
+          price: membershipForm.price === '' ? 0 : Number(membershipForm.price),
           start_date: membershipForm.start_date,
           end_date: membershipForm.end_date || null,
           discount: membershipForm.discount === '' ? 0 : Number(membershipForm.discount),
@@ -187,6 +228,7 @@ export function MembershipsPage() {
           client_id: Number(membershipForm.client_id),
           plan_id: Number(membershipForm.plan_id),
           membership_number: membershipForm.membership_number || null,
+          price: membershipForm.price === '' ? 0 : Number(membershipForm.price),
           start_date: membershipForm.start_date,
           end_date: membershipForm.end_date || null,
           discount: membershipForm.discount === '' ? 0 : Number(membershipForm.discount),
@@ -357,19 +399,25 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="membership_number" onChange={handleMembershipChange} value={membershipForm.membership_number} />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-brand-forest">Inicio</span>
-                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="start_date" onChange={handleMembershipChange} required type="date" value={membershipForm.start_date} />
+                <span className="text-sm font-semibold text-brand-forest">Costo del plan</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="price" onChange={handleMembershipChange} required step="0.01" type="number" value={membershipForm.price} />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-brand-forest">Fin opcional</span>
-                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="end_date" onChange={handleMembershipChange} type="date" value={membershipForm.end_date} />
+                <span className="text-sm font-semibold text-brand-forest">Inicio</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="start_date" onChange={handleMembershipChange} required type="date" value={membershipForm.start_date} />
               </label>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Fin opcional</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="end_date" onChange={handleMembershipChange} type="date" value={membershipForm.end_date} />
+              </label>
+              <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Descuento</span>
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="discount" onChange={handleMembershipChange} step="0.01" type="number" value={membershipForm.discount} />
               </label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-1">
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Monto pagado</span>
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="amount_paid" onChange={handleMembershipChange} step="0.01" type="number" value={membershipForm.amount_paid} />

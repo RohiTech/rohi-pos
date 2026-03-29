@@ -1,4 +1,4 @@
-let activeCurrencyCode = 'USD';
+let activeCurrencyCode = 'NIO';
 let activeLocale = 'es-NI';
 
 export function setCurrencyFormatterOptions(options = {}) {

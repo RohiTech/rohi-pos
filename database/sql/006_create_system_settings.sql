@@ -12,5 +12,9 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
 INSERT INTO system_settings (setting_key, setting_value, description)
-VALUES ('currency_code', 'USD', 'Codigo de moneda principal del sistema')
+VALUES ('currency_code', 'NIO', 'Codigo de moneda principal del sistema')
+ON CONFLICT (setting_key) DO NOTHING;
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+VALUES ('routine_price', '0', 'Precio configurado para la rutina')
 ON CONFLICT (setting_key) DO NOTHING;

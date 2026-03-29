@@ -3,13 +3,13 @@ import { query } from '../config/db.js';
 import { createHttpError } from '../utils/http.js';
 
 const settingsRouter = Router();
-const ALLOWED_CURRENCIES = new Set(['USD', 'NIO', 'EUR', 'MXN', 'COP']);
+const SYSTEM_CURRENCY = 'NIO';
 
 async function getSettingsMap() {
   const result = await query(
     `SELECT setting_key, setting_value
      FROM system_settings
-     WHERE setting_key IN ('currency_code', 'membership_expiry_alert_days')
+     WHERE setting_key IN ('currency_code', 'membership_expiry_alert_days', 'routine_price')
      ORDER BY setting_key ASC`
   );
 
@@ -23,8 +23,9 @@ settingsRouter.get('/', async (_request, response, next) => {
     response.json({
       ok: true,
       data: {
-        currency_code: settings.currency_code || 'USD',
-        membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3)
+        currency_code: settings.currency_code || SYSTEM_CURRENCY,
+        membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3),
+        routine_price: Number(settings.routine_price || 0)
       }
     });
   } catch (error) {
@@ -34,21 +35,15 @@ settingsRouter.get('/', async (_request, response, next) => {
 
 settingsRouter.put('/', async (request, response, next) => {
   try {
-    const currencyCode = String(request.body.currency_code || '')
-      .trim()
-      .toUpperCase();
     const alertDays = Number.parseInt(request.body.membership_expiry_alert_days, 10);
-
-    if (!currencyCode) {
-      throw createHttpError(400, 'currency_code is required');
-    }
-
-    if (!ALLOWED_CURRENCIES.has(currencyCode)) {
-      throw createHttpError(400, 'currency_code is invalid');
-    }
+    const routinePrice = Number(request.body.routine_price);
 
     if (!Number.isInteger(alertDays) || alertDays < 0 || alertDays > 30) {
       throw createHttpError(400, 'membership_expiry_alert_days must be between 0 and 30');
+    }
+
+    if (Number.isNaN(routinePrice) || routinePrice < 0) {
+      throw createHttpError(400, 'routine_price must be greater than or equal to 0');
     }
 
     await query(
@@ -56,7 +51,7 @@ settingsRouter.put('/', async (request, response, next) => {
        VALUES ('currency_code', $1, 'Codigo de moneda principal del sistema')
        ON CONFLICT (setting_key)
        DO UPDATE SET setting_value = EXCLUDED.setting_value`,
-      [currencyCode]
+      [SYSTEM_CURRENCY]
     );
 
     await query(
@@ -65,18 +60,27 @@ settingsRouter.put('/', async (request, response, next) => {
          'membership_expiry_alert_days',
          $1,
          'Dias de anticipacion para avisar vencimiento de membresia'
-       )
+      )
        ON CONFLICT (setting_key)
        DO UPDATE SET setting_value = EXCLUDED.setting_value`,
       [String(alertDays)]
+    );
+
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description)
+       VALUES ('routine_price', $1, 'Precio configurado para la rutina')
+       ON CONFLICT (setting_key)
+       DO UPDATE SET setting_value = EXCLUDED.setting_value`,
+      [String(routinePrice)]
     );
 
     response.json({
       ok: true,
       message: 'Settings updated successfully',
       data: {
-        currency_code: currencyCode,
-        membership_expiry_alert_days: alertDays
+        currency_code: SYSTEM_CURRENCY,
+        membership_expiry_alert_days: alertDays,
+        routine_price: routinePrice
       }
     });
   } catch (error) {

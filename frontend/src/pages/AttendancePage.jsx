@@ -85,15 +85,39 @@ export function AttendancePage() {
   }, [form.access_type, selectedClient]);
 
   function handleSelectClient(client) {
+    if (!client.is_active) {
+      setSelectedClient(client);
+      setForm(initialForm);
+      setMessage('');
+      setError('El cliente seleccionado esta inactivo y no puede marcar asistencia.');
+      return;
+    }
+
     setSelectedClient(client);
     setForm((current) => ({
       ...current,
       client_id: String(client.id),
-      access_type: client.can_check_in_with_membership ? 'membership' : 'daily_pass'
+      access_type: client.can_check_in_with_membership ? 'membership' : 'daily_pass',
+      daily_pass_amount: client.can_check_in_with_membership ? current.daily_pass_amount : String(settings.routine_price || '')
     }));
     setMessage('');
     setError('');
   }
+
+  useEffect(() => {
+    if (form.access_type !== 'daily_pass') {
+      return;
+    }
+
+    if (Number(form.daily_pass_amount || 0) > 0) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      daily_pass_amount: String(settings.routine_price || '')
+    }));
+  }, [form.access_type, form.daily_pass_amount, settings.routine_price]);
 
   async function handleSearch(event) {
     event.preventDefault();
@@ -199,7 +223,9 @@ export function AttendancePage() {
                     className={`w-full rounded-2xl border p-4 text-left transition ${
                       selectedClient?.id === client.id
                         ? 'border-brand-clay bg-brand-cream/70'
-                        : 'border-brand-sand/70 bg-white hover:bg-brand-cream/40'
+                        : client.is_active
+                          ? 'border-brand-sand/70 bg-white hover:bg-brand-cream/40'
+                          : 'border-slate-200 bg-slate-100/80 opacity-70'
                     }`}
                     onClick={() => handleSelectClient(client)}
                     type="button"
@@ -216,7 +242,11 @@ export function AttendancePage() {
                           {client.plan_name || 'Sin plan registrado'}
                         </p>
                       </div>
-                      {client.membership_effective_status ? (
+                      {!client.is_active ? (
+                        <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
+                          inactivo
+                        </span>
+                      ) : client.membership_effective_status ? (
                         <StatusBadge value={client.membership_effective_status} />
                       ) : (
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
@@ -227,6 +257,11 @@ export function AttendancePage() {
                     <p className="mt-3 text-sm text-brand-forest/70">
                       Vence: {formatDate(client.end_date)}
                     </p>
+                    {!client.is_active ? (
+                      <p className="mt-2 text-sm font-semibold text-rose-700">
+                        Cliente inactivo. No se permite registrar asistencia.
+                      </p>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -288,6 +323,11 @@ export function AttendancePage() {
               <p className="mt-1 text-sm text-brand-forest/70">
                 Vence: {formatDate(selectedClient.end_date)}
               </p>
+              {!selectedClient.is_active ? (
+                <p className="mt-3 rounded-2xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-700">
+                  El cliente esta inactivo. No se puede registrar asistencia.
+                </p>
+              ) : null}
               {!selectedClient.can_check_in_with_membership ? (
                 <p className="mt-3 rounded-2xl bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-700">
                   La membresia no esta vigente. Solo se permite ingreso con pago diario.
@@ -321,7 +361,7 @@ export function AttendancePage() {
             {form.access_type === 'daily_pass' ? (
               <>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-brand-forest">Monto pagado hoy</span>
+                  <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
                   <input
                     className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                     min="0.01"
@@ -379,6 +419,7 @@ export function AttendancePage() {
               disabled={
                 saving ||
                 !selectedClient ||
+                !selectedClient.is_active ||
                 (form.access_type === 'membership' && !selectedClient.can_check_in_with_membership)
               }
               type="submit"

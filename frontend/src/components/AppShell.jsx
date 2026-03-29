@@ -52,10 +52,6 @@ export function AppShell() {
           <div className={`mb-6 flex items-start ${isCollapsed ? 'justify-center' : 'justify-between gap-3'}`}>
             <div className={isCollapsed ? 'hidden' : 'min-w-0'}>
               <p className="text-sm uppercase tracking-[0.3em] text-brand-sand/80">RohiPOS</p>
-              <h1 className="mt-3 font-display text-4xl leading-none">Gym control with a sales pulse.</h1>
-              <p className="mt-4 text-sm text-brand-sand/85">
-                Panel operativo para recepcion, membresias, inventario y ventas del gimnasio.
-              </p>
             </div>
 
             <button
@@ -91,18 +87,6 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
-
-          <div className={`rounded-3xl bg-white/10 ${isCollapsed ? 'mt-6 p-3 text-center' : 'mt-10 p-4'}`}>
-            <p className="text-xs uppercase tracking-[0.2em] text-brand-sand/70">Servidor</p>
-            <p className={`mt-2 font-semibold ${isCollapsed ? 'text-sm' : 'text-lg'}`}>
-              {isCollapsed ? 'API OK' : 'API local conectada'}
-            </p>
-            {!isCollapsed ? (
-              <p className="mt-2 text-sm text-brand-sand/85">
-                Usa `http://localhost:3001/api` mientras montamos autenticacion y despliegue.
-              </p>
-            ) : null}
-          </div>
 
           <div className={`mt-4 rounded-3xl bg-white/10 ${isCollapsed ? 'p-3 text-center' : 'p-4'}`}>
             <p className="text-xs uppercase tracking-[0.2em] text-brand-sand/70">Sesion</p>

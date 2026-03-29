@@ -8,8 +8,9 @@ const SettingsContext = createContext(null);
 export function SettingsProvider({ children }) {
   const { isAuthenticated } = useAuth();
   const [settings, setSettings] = useState({
-    currency_code: 'USD',
-    membership_expiry_alert_days: 3
+    currency_code: 'NIO',
+    membership_expiry_alert_days: 3,
+    routine_price: 0
   });
   const [loading, setLoading] = useState(false);
 
@@ -23,7 +24,7 @@ export function SettingsProvider({ children }) {
   useEffect(() => {
     async function loadSettings() {
       if (!isAuthenticated) {
-        setSettings({ currency_code: 'USD', membership_expiry_alert_days: 3 });
+        setSettings({ currency_code: 'NIO', membership_expiry_alert_days: 3, routine_price: 0 });
         setLoading(false);
         return;
       }
@@ -33,11 +34,12 @@ export function SettingsProvider({ children }) {
       try {
         const response = await apiGet('/settings');
         setSettings({
-          currency_code: response.data.currency_code || 'USD',
-          membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3)
+          currency_code: response.data.currency_code || 'NIO',
+          membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3),
+          routine_price: Number(response.data.routine_price || 0)
         });
       } catch (_error) {
-        setSettings({ currency_code: 'USD', membership_expiry_alert_days: 3 });
+        setSettings({ currency_code: 'NIO', membership_expiry_alert_days: 3, routine_price: 0 });
       } finally {
         setLoading(false);
       }
@@ -49,8 +51,9 @@ export function SettingsProvider({ children }) {
   async function updateSettings(nextSettings) {
     const response = await apiPut('/settings', nextSettings);
     setSettings({
-      currency_code: response.data.currency_code || 'USD',
-      membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3)
+      currency_code: response.data.currency_code || 'NIO',
+      membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3),
+      routine_price: Number(response.data.routine_price || 0)
     });
     return response.data;
   }
