@@ -7,6 +7,18 @@ import { useApi } from '../hooks/useApi';
 import { apiGet, apiPost, apiPostForm, apiPutForm, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
+function dataURLToBlob(dataURL) {
+  const arr = dataURL.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
 const PRODUCT_PAGE_SIZE = 6;
 const MOVEMENT_PAGE_SIZE = 8;
 const SALE_PAGE_SIZE = 5;
@@ -1065,8 +1077,14 @@ export function PosPage() {
                         <div className="relative h-28">
                           <img
                             alt={product.name}
-                            className="h-full w-full object-cover"
+                            className="h-full w-full cursor-pointer object-cover"
                             src={product.image_data_url}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const blob = dataURLToBlob(product.image_data_url);
+                              const url = URL.createObjectURL(blob);
+                              window.open(url);
+                            }}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-brand-forest/85 via-brand-forest/45 to-transparent p-4 text-white">
                             <p className="text-xs uppercase tracking-[0.18em] text-white/70">
@@ -1594,8 +1612,13 @@ export function PosPage() {
                     {product.image_data_url ? (
                       <img
                         alt={product.name}
-                        className="mb-4 h-44 w-full rounded-[1.5rem] object-cover"
+                        className="mb-4 h-44 w-full cursor-pointer rounded-[1.5rem] object-cover"
                         src={product.image_data_url}
+                        onClick={() => {
+                          const blob = dataURLToBlob(product.image_data_url);
+                          const url = URL.createObjectURL(blob);
+                          window.open(url);
+                        }}
                       />
                     ) : null}
                     <div className="flex flex-wrap items-start justify-between gap-3">

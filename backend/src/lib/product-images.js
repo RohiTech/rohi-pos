@@ -3,11 +3,13 @@ import { createHttpError } from '../utils/http.js';
 
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_WIDTH = 500;
+const MAX_HEIGHT = 500;
 const OUTPUT_WIDTH = 640;
 const OUTPUT_HEIGHT = 640;
 const OUTPUT_QUALITY = 82;
 
-export function ensureValidProductImage(file) {
+export async function ensureValidProductImage(file) {
   if (!file) {
     return null;
   }
@@ -20,6 +22,15 @@ export function ensureValidProductImage(file) {
     throw createHttpError(400, 'La imagen no debe superar 5 MB');
   }
 
+  try {
+    const metadata = await sharp(file.buffer).metadata();
+    if (metadata.width > MAX_WIDTH || metadata.height > MAX_HEIGHT) {
+      throw createHttpError(400, 'La imagen no debe superar 500x500 píxeles');
+    }
+  } catch (error) {
+    throw createHttpError(400, 'No fue posible validar la imagen');
+  }
+
   return file;
 }
 
@@ -28,7 +39,7 @@ export async function optimizeProductImage(file) {
     return null;
   }
 
-  ensureValidProductImage(file);
+  await ensureValidProductImage(file);
 
   try {
     const optimizedBuffer = await sharp(file.buffer)
