@@ -2,7 +2,12 @@ import { Router } from 'express';
 import multer from 'multer';
 import { query, withTransaction } from '../config/db.js';
 import { buildProductImageDataUrl, optimizeProductImage } from '../lib/product-images.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 import {
   validateCreateProductPayload,
   validateInventoryAdjustmentPayload,
@@ -79,13 +84,19 @@ productsRouter.get('/', async (request, response, next) => {
   try {
     const search = String(request.query.search || '').trim();
     const lowStock = request.query.low_stock === 'true';
+    const onlyActive = request.query.active === 'true';
+    const categoryId = parsePositiveInteger(request.query.category_id);
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 10,
+      maxLimit: 100
+    });
     const params = [];
     const conditions = [];
 
     if (search) {
       params.push(`%${search}%`);
       conditions.push(
-        `(p.sku ILIKE $${params.length} OR p.name ILIKE $${params.length} OR COALESCE(p.barcode, '') ILIKE $${params.length})`
+        `(p.sku ILIKE $${params.length} OR p.name ILIKE $${params.length} OR COALESCE(p.barcode, '') ILIKE $${params.length} OR COALESCE(pc.name, '') ILIKE $${params.length})`
       );
     }
 
@@ -93,16 +104,43 @@ productsRouter.get('/', async (request, response, next) => {
       conditions.push('p.stock_quantity <= p.minimum_stock');
     }
 
+    if (onlyActive) {
+      conditions.push('p.is_active = TRUE');
+    }
+
+    if (categoryId) {
+      params.push(categoryId);
+      conditions.push(`p.category_id = $${params.length}`);
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM products p
+       LEFT JOIN product_categories pc ON pc.id = p.category_id
+       ${whereClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
 
     const result = await query(
       `${baseProductSelect}
        ${whereClause}
-       ORDER BY p.name ASC`,
-      params
+       ORDER BY p.name ASC
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
     );
 
-    response.json({ ok: true, count: result.rowCount, data: result.rows.map(mapProductRow) });
+    response.json({
+      ok: true,
+      count: result.rowCount,
+      data: result.rows.map(mapProductRow),
+      pagination: createPaginationMeta(totalItems, page, limit)
+    });
   } catch (error) {
     next(error);
   }
@@ -313,21 +351,59 @@ productsRouter.post('/inventory-adjustments', async (request, response, next) =>
 productsRouter.get('/:id/inventory-movements', async (request, response, next) => {
   try {
     const productId = parsePositiveInteger(request.params.id);
+    const search = String(request.query.search || '').trim();
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 8,
+      maxLimit: 100
+    });
 
     if (!productId) {
       throw createHttpError(400, 'Product id must be a positive integer');
     }
 
+    const params = [productId];
+    let searchClause = '';
+
+    if (search) {
+      params.push(`%${search}%`);
+      searchClause = `
+        AND (
+          movement_type ILIKE $${params.length}
+          OR COALESCE(reference_type, '') ILIKE $${params.length}
+          OR COALESCE(notes, '') ILIKE $${params.length}
+          OR CAST(quantity AS TEXT) ILIKE $${params.length}
+        )
+      `;
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM inventory_movements
+       WHERE product_id = $1
+       ${searchClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
+
     const result = await query(
       `SELECT id, movement_type, quantity, previous_stock, new_stock, unit_cost, reference_type, reference_id, notes, moved_at
        FROM inventory_movements
        WHERE product_id = $1
+       ${searchClause}
        ORDER BY moved_at DESC, id DESC
-       LIMIT 100`,
-      [productId]
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
     );
 
-    response.json({ ok: true, count: result.rowCount, data: result.rows });
+    response.json({
+      ok: true,
+      count: result.rowCount,
+      data: result.rows,
+      pagination: createPaginationMeta(totalItems, page, limit)
+    });
   } catch (error) {
     next(error);
   }

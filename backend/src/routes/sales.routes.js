@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../config/db.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 import { validateCreateSalePayload } from '../utils/pos.js';
 
 const salesRouter = Router();
@@ -81,15 +86,53 @@ async function getSaleById(saleId) {
 
 salesRouter.get('/', async (request, response, next) => {
   try {
-    const limit = Math.min(Number.parseInt(request.query.limit, 10) || 50, 100);
-    const result = await query(
-      `${baseSaleSelect}
-       ORDER BY s.sold_at DESC, s.id DESC
-       LIMIT $1`,
-      [limit]
+    const search = String(request.query.search || '').trim();
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 5,
+      maxLimit: 100
+    });
+    const params = [];
+    let whereClause = '';
+
+    if (search) {
+      params.push(`%${search}%`);
+      whereClause = `
+        WHERE
+          s.sale_number ILIKE $1 OR
+          COALESCE(c.client_code, '') ILIKE $1 OR
+          COALESCE(c.first_name, '') ILIKE $1 OR
+          COALESCE(c.last_name, '') ILIKE $1 OR
+          u.username ILIKE $1 OR
+          s.status ILIKE $1
+      `;
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM sales s
+       LEFT JOIN clients c ON c.id = s.client_id
+       INNER JOIN users u ON u.id = s.cashier_user_id
+       ${whereClause}`,
+      params
     );
 
-    response.json({ ok: true, count: result.rowCount, data: result.rows });
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
+    const result = await query(
+      `${baseSaleSelect}
+       ${whereClause}
+       ORDER BY s.sold_at DESC, s.id DESC
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
+    );
+
+    response.json({
+      ok: true,
+      count: result.rowCount,
+      data: result.rows,
+      pagination: createPaginationMeta(totalItems, page, limit)
+    });
   } catch (error) {
     next(error);
   }

@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { apiGet, apiPost, apiPostForm, apiPutForm } from '../lib/api';
+import { apiGet, apiPost, apiPostForm, apiPutForm, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const PRODUCT_PAGE_SIZE = 6;
@@ -119,6 +119,30 @@ export function PosPage() {
   const [movementPage, setMovementPage] = useState(1);
   const [salePage, setSalePage] = useState(1);
   const [posGridPage, setPosGridPage] = useState(1);
+  const [productPagination, setProductPagination] = useState({
+    page: 1,
+    limit: PRODUCT_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
+  const [movementPagination, setMovementPagination] = useState({
+    page: 1,
+    limit: MOVEMENT_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
+  const [salePagination, setSalePagination] = useState({
+    page: 1,
+    limit: SALE_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
+  const [posPagination, setPosPagination] = useState({
+    page: 1,
+    limit: POS_GRID_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
   const [selectedLineIndex, setSelectedLineIndex] = useState(0);
   const [keypadTarget, setKeypadTarget] = useState('amount-tendered');
   const [amountTendered, setAmountTendered] = useState('');
@@ -141,25 +165,98 @@ export function PosPage() {
   const [savingInventory, setSavingInventory] = useState(false);
   const [savingSale, setSavingSale] = useState(false);
 
-  const productsQuery = useApi(() => apiGet('/products'), [refreshKey]);
+  const productOptionsQuery = useApi(() => apiGet('/products?limit=100'), [refreshKey]);
+  const productCatalogQuery = useApi(
+    () =>
+      apiGet(
+        `/products${buildQueryString({
+          search: productSearch.trim(),
+          page: productPage,
+          limit: PRODUCT_PAGE_SIZE
+        })}`
+      ),
+    [productSearch, productPage, refreshKey]
+  );
   const categoriesQuery = useApi(() => apiGet('/product-categories'), [refreshKey]);
-  const clientsQuery = useApi(() => apiGet('/clients'), [refreshKey]);
-  const salesQuery = useApi(() => apiGet('/sales'), [refreshKey]);
+  const clientsQuery = useApi(() => apiGet('/clients?active=true&limit=100'), [refreshKey]);
+  const salesQuery = useApi(
+    () =>
+      apiGet(
+        `/sales${buildQueryString({
+          search: saleSearch.trim(),
+          page: salePage,
+          limit: SALE_PAGE_SIZE
+        })}`
+      ),
+    [saleSearch, salePage, refreshKey]
+  );
   const salesSummaryQuery = useApi(() => apiGet('/sales/summary'), [refreshKey]);
   const movementsQuery = useApi(
     () =>
       selectedProductId
-        ? apiGet(`/products/${selectedProductId}/inventory-movements`)
+        ? apiGet(
+            `/products/${selectedProductId}/inventory-movements${buildQueryString({
+              search: movementSearch.trim(),
+              page: movementPage,
+              limit: MOVEMENT_PAGE_SIZE
+            })}`
+          )
         : Promise.resolve({ data: [] }),
-    [selectedProductId, refreshKey]
+    [selectedProductId, movementSearch, movementPage, refreshKey]
+  );
+  const posProductsQuery = useApi(
+    () =>
+      apiGet(
+        `/products${buildQueryString({
+          active: true,
+          category_id: activeCategoryId !== 'all' ? activeCategoryId : '',
+          search: posSearch.trim(),
+          page: posGridPage,
+          limit: POS_GRID_PAGE_SIZE
+        })}`
+      ),
+    [activeCategoryId, posSearch, posGridPage, refreshKey]
   );
 
-  const products = productsQuery.data?.data || [];
+  const products = productOptionsQuery.data?.data || [];
+  const productResults = productCatalogQuery.data?.data || [];
   const categories = categoriesQuery.data?.data || [];
   const activeClients = (clientsQuery.data?.data || []).filter((client) => client.is_active);
   const sales = salesQuery.data?.data || [];
   const salesSummary = salesSummaryQuery.data?.data || {};
   const movements = movementsQuery.data?.data || [];
+  const posProducts = posProductsQuery.data?.data || [];
+
+  useEffect(() => {
+    if (productCatalogQuery.data?.pagination) {
+      setProductPagination(productCatalogQuery.data.pagination);
+    }
+  }, [productCatalogQuery.data]);
+
+  useEffect(() => {
+    if (salesQuery.data?.pagination) {
+      setSalePagination(salesQuery.data.pagination);
+    }
+  }, [salesQuery.data]);
+
+  useEffect(() => {
+    if (movementsQuery.data?.pagination) {
+      setMovementPagination(movementsQuery.data.pagination);
+    } else if (!selectedProductId) {
+      setMovementPagination({
+        page: 1,
+        limit: MOVEMENT_PAGE_SIZE,
+        totalItems: 0,
+        totalPages: 1
+      });
+    }
+  }, [movementsQuery.data, selectedProductId]);
+
+  useEffect(() => {
+    if (posProductsQuery.data?.pagination) {
+      setPosPagination(posProductsQuery.data.pagination);
+    }
+  }, [posProductsQuery.data]);
 
   useEffect(() => {
     if (!selectedProductId && products.length > 0) {
@@ -445,78 +542,7 @@ export function PosPage() {
     }
   }
 
-  const filteredProducts = useMemo(() => {
-    const term = normalizeText(productSearch);
-
-    return products.filter((product) => {
-      if (!term) {
-        return true;
-      }
-
-      return [product.sku, product.name, product.category_name, product.barcode]
-        .filter(Boolean)
-        .some((value) => normalizeText(value).includes(term));
-    });
-  }, [productSearch, products]);
-
-  const filteredMovements = useMemo(() => {
-    const term = normalizeText(movementSearch);
-
-    return movements.filter((movement) => {
-      if (!term) {
-        return true;
-      }
-
-      return [movement.movement_type, movement.reference_type, movement.notes, movement.quantity]
-        .filter(Boolean)
-        .some((value) => normalizeText(value).includes(term));
-    });
-  }, [movementSearch, movements]);
-
-  const filteredSales = useMemo(() => {
-    const term = normalizeText(saleSearch);
-
-    return sales.filter((sale) => {
-      if (!term) {
-        return true;
-      }
-
-      return [
-        sale.sale_number,
-        sale.client_code,
-        sale.client_first_name,
-        sale.client_last_name,
-        sale.cashier_username,
-        sale.status
-      ]
-        .filter(Boolean)
-        .some((value) => normalizeText(value).includes(term));
-    });
-  }, [saleSearch, sales]);
-
   const selectedProduct = products.find((product) => String(product.id) === String(selectedProductId));
-
-  const posProducts = useMemo(() => {
-    const term = normalizeText(posSearch);
-
-    return products
-      .filter((product) => product.is_active)
-      .filter((product) => activeCategoryId === 'all' || String(product.category_id) === activeCategoryId)
-      .filter((product) => {
-        if (!term) {
-          return true;
-        }
-
-        return [product.name, product.sku, product.barcode, product.category_name]
-          .filter(Boolean)
-          .some((value) => normalizeText(value).includes(term));
-      });
-  }, [activeCategoryId, posSearch, products]);
-
-  const paginatedPosProducts = posProducts.slice(
-    (posGridPage - 1) * POS_GRID_PAGE_SIZE,
-    posGridPage * POS_GRID_PAGE_SIZE
-  );
 
   const ticketItems = useMemo(
     () =>
@@ -546,21 +572,6 @@ export function PosPage() {
   const tenderedAmount = Number(amountTendered || 0);
   const changeDue = Math.max(tenderedAmount - ticketTotal, 0);
   const balanceDue = Math.max(ticketTotal - tenderedAmount, 0);
-
-  const totalProductPages = Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PAGE_SIZE));
-  const totalMovementPages = Math.max(1, Math.ceil(filteredMovements.length / MOVEMENT_PAGE_SIZE));
-  const totalSalePages = Math.max(1, Math.ceil(filteredSales.length / SALE_PAGE_SIZE));
-  const totalPosGridPages = Math.max(1, Math.ceil(posProducts.length / POS_GRID_PAGE_SIZE));
-
-  const paginatedProducts = filteredProducts.slice(
-    (productPage - 1) * PRODUCT_PAGE_SIZE,
-    productPage * PRODUCT_PAGE_SIZE
-  );
-  const paginatedMovements = filteredMovements.slice(
-    (movementPage - 1) * MOVEMENT_PAGE_SIZE,
-    movementPage * MOVEMENT_PAGE_SIZE
-  );
-  const paginatedSales = filteredSales.slice((salePage - 1) * SALE_PAGE_SIZE, salePage * SALE_PAGE_SIZE);
 
   function addProductToTicket(product) {
     clearMessages();
@@ -1026,11 +1037,11 @@ export function PosPage() {
                   <h3 className="mt-1 text-xl font-semibold text-brand-forest">Productos para caja</h3>
                 </div>
                 <p className="text-sm text-brand-forest/70">
-                  {posProducts.length} articulos disponibles en esta vista
+                  {posPagination.totalItems} articulos disponibles en esta vista
                 </p>
               </div>
 
-              {!productsQuery.loading && !paginatedPosProducts.length ? (
+              {!posProductsQuery.loading && !posProducts.length ? (
                 <EmptyState
                   title="Sin articulos"
                   description="No hay productos activos que coincidan con la categoria o el filtro de busqueda."
@@ -1038,7 +1049,7 @@ export function PosPage() {
               ) : null}
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                {paginatedPosProducts.map((product, index) => {
+                {posProducts.map((product, index) => {
                   const categoryIndex = categories.findIndex(
                     (category) => String(category.id) === String(product.category_id)
                   );
@@ -1100,12 +1111,12 @@ export function PosPage() {
               </div>
 
               <Pagination
-                currentPage={posGridPage}
+                currentPage={posPagination.page}
                 itemLabel="articulos"
                 onPageChange={setPosGridPage}
-                pageSize={POS_GRID_PAGE_SIZE}
-                totalItems={posProducts.length}
-                totalPages={totalPosGridPages}
+                pageSize={posPagination.limit}
+                totalItems={posPagination.totalItems}
+                totalPages={posPagination.totalPages}
               />
             </section>
           </div>
@@ -1166,7 +1177,7 @@ export function PosPage() {
               <form className="grid gap-4" onSubmit={handleCreateSale}>
                 <button
                   className="rounded-2xl bg-brand-moss px-4 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
-                  disabled={savingSale || productsQuery.loading || ticketTotal <= 0}
+                  disabled={savingSale || productOptionsQuery.loading || ticketTotal <= 0}
                   type="submit"
                 >
                   {savingSale ? 'Guardando...' : 'Registrar venta'}
@@ -1327,13 +1338,13 @@ export function PosPage() {
             </div>
 
             {salesQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando ventas...</p> : null}
-            {!salesQuery.loading && !filteredSales.length ? (
+            {!salesQuery.loading && !sales.length ? (
               <EmptyState title="Sin ventas" description="No hay ventas que coincidan con la busqueda actual." />
             ) : null}
 
-            {filteredSales.length ? (
+            {sales.length ? (
               <div className="space-y-3">
-                {paginatedSales.map((sale) => (
+                {sales.map((sale) => (
                   <article key={sale.id} className="rounded-2xl border border-brand-sand/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -1355,12 +1366,12 @@ export function PosPage() {
             ) : null}
 
             <Pagination
-              currentPage={salePage}
+              currentPage={salePagination.page}
               itemLabel="ventas"
               onPageChange={setSalePage}
-              pageSize={SALE_PAGE_SIZE}
-              totalItems={filteredSales.length}
-              totalPages={totalSalePages}
+              pageSize={salePagination.limit}
+              totalItems={salePagination.totalItems}
+              totalPages={salePagination.totalPages}
             />
           </DataPanel>
         </div>
@@ -1568,17 +1579,17 @@ export function PosPage() {
               />
             </div>
 
-            {productsQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando productos...</p> : null}
-            {!productsQuery.loading && !filteredProducts.length ? (
+            {productCatalogQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando productos...</p> : null}
+            {!productCatalogQuery.loading && !productResults.length ? (
               <EmptyState
                 title="Sin productos"
                 description="Todavia no hay productos que coincidan con la busqueda."
               />
             ) : null}
 
-            {filteredProducts.length ? (
+            {productResults.length ? (
               <div className="space-y-3">
-                {paginatedProducts.map((product) => (
+                {productResults.map((product) => (
                   <article key={product.id} className="rounded-2xl border border-brand-sand/70 p-4">
                     {product.image_data_url ? (
                       <img
@@ -1636,12 +1647,12 @@ export function PosPage() {
             ) : null}
 
             <Pagination
-              currentPage={productPage}
+              currentPage={productPagination.page}
               itemLabel="productos"
               onPageChange={setProductPage}
-              pageSize={PRODUCT_PAGE_SIZE}
-              totalItems={filteredProducts.length}
-              totalPages={totalProductPages}
+              pageSize={productPagination.limit}
+              totalItems={productPagination.totalItems}
+              totalPages={productPagination.totalPages}
             />
           </DataPanel>
         </div>
@@ -1773,11 +1784,11 @@ export function PosPage() {
             {!movementsQuery.loading && !selectedProductId ? (
               <EmptyState title="Sin producto seleccionado" description="Elige un producto para revisar el historial." />
             ) : null}
-            {!movementsQuery.loading && selectedProductId && !filteredMovements.length ? (
+            {!movementsQuery.loading && selectedProductId && !movements.length ? (
               <EmptyState title="Sin movimientos" description="No hay movimientos que coincidan con la busqueda actual." />
             ) : null}
 
-            {filteredMovements.length ? (
+            {movements.length ? (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
                   <thead className="text-brand-forest/70">
@@ -1791,7 +1802,7 @@ export function PosPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedMovements.map((movement) => (
+                    {movements.map((movement) => (
                       <tr key={movement.id} className="border-t border-brand-sand/60">
                         <td className="py-3">{formatDate(movement.moved_at)}</td>
                         <td className="py-3">{movementLabels[movement.movement_type] || movement.movement_type}</td>
@@ -1807,12 +1818,12 @@ export function PosPage() {
             ) : null}
 
             <Pagination
-              currentPage={movementPage}
+              currentPage={movementPagination.page}
               itemLabel="movimientos"
               onPageChange={setMovementPage}
-              pageSize={MOVEMENT_PAGE_SIZE}
-              totalItems={filteredMovements.length}
-              totalPages={totalMovementPages}
+              pageSize={movementPagination.limit}
+              totalItems={movementPagination.totalItems}
+              totalPages={movementPagination.totalPages}
             />
           </DataPanel>
         </div>

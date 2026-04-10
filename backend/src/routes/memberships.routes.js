@@ -6,7 +6,12 @@ import {
   validateCreateMembershipPayload,
   validateUpdateMembershipPayload
 } from '../utils/memberships.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 
 const membershipsRouter = Router();
 
@@ -88,8 +93,12 @@ async function getMembershipById(membershipId) {
 
 membershipsRouter.get('/', async (request, response, next) => {
   try {
-    const limit = Math.min(Number.parseInt(request.query.limit, 10) || 50, 100);
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 6,
+      maxLimit: 100
+    });
     const status = String(request.query.status || '').trim();
+    const search = String(request.query.search || '').trim();
     const clientId = parsePositiveInteger(request.query.client_id);
     const expiringInDays = Number.parseInt(request.query.expiring_in_days, 10);
 
@@ -106,6 +115,13 @@ membershipsRouter.get('/', async (request, response, next) => {
       conditions.push(`m.client_id = $${params.length}`);
     }
 
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(
+        `(m.membership_number ILIKE $${params.length} OR c.client_code ILIKE $${params.length} OR c.first_name ILIKE $${params.length} OR c.last_name ILIKE $${params.length} OR mp.name ILIKE $${params.length} OR m.status ILIKE $${params.length})`
+      );
+    }
+
     if (Number.isInteger(expiringInDays) && expiringInDays >= 0) {
       params.push(expiringInDays);
       conditions.push(
@@ -116,20 +132,32 @@ membershipsRouter.get('/', async (request, response, next) => {
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    params.push(limit);
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       ${whereClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
 
     const result = await query(
       `${baseMembershipSelect}
        ${whereClause}
        ORDER BY m.end_date ASC, m.id DESC
-       LIMIT $${params.length}`,
-      params
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
     );
 
     response.json({
       ok: true,
       count: result.rowCount,
-      data: result.rows
+      data: result.rows,
+      pagination: createPaginationMeta(totalItems, page, limit)
     });
   } catch (error) {
     next(error);

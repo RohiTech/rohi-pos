@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
+import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const initialForm = {
@@ -32,7 +33,15 @@ export function AttendancePage() {
   const { user } = useAuth();
   const { settings } = useSettings();
   const [search, setSearch] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
+  const [clientPage, setClientPage] = useState(1);
   const [clients, setClients] = useState([]);
+  const [clientPagination, setClientPagination] = useState({
+    page: 1,
+    limit: 8,
+    totalItems: 0,
+    totalPages: 1
+  });
   const [summary, setSummary] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -42,14 +51,16 @@ export function AttendancePage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  async function loadDashboard(searchTerm = '') {
+  async function loadDashboard(searchTerm = '', page = 1) {
     setLoading(true);
     setError('');
 
     try {
-      const querySuffix = searchTerm.trim()
-        ? `?search=${encodeURIComponent(searchTerm.trim())}`
-        : '';
+      const querySuffix = buildQueryString({
+        search: searchTerm.trim(),
+        page,
+        limit: 8
+      });
 
       const [summaryResponse, checkinsResponse, clientsResponse] = await Promise.all([
         apiGet('/attendance/summary'),
@@ -60,6 +71,14 @@ export function AttendancePage() {
       setSummary(summaryResponse.data);
       setCheckins(checkinsResponse.data);
       setClients(clientsResponse.data);
+      setClientPagination(
+        clientsResponse.pagination || {
+          page: 1,
+          limit: 8,
+          totalItems: clientsResponse.data.length,
+          totalPages: Math.max(1, Math.ceil(clientsResponse.data.length / 8))
+        }
+      );
     } catch (requestError) {
       setError(requestError.message || 'No fue posible cargar asistencia');
     } finally {
@@ -68,8 +87,8 @@ export function AttendancePage() {
   }
 
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    loadDashboard(submittedSearch, clientPage);
+  }, [submittedSearch, clientPage]);
 
   useEffect(() => {
     if (!selectedClient) {
@@ -121,7 +140,8 @@ export function AttendancePage() {
 
   async function handleSearch(event) {
     event.preventDefault();
-    await loadDashboard(search);
+    setClientPage(1);
+    setSubmittedSearch(search);
   }
 
   async function handleSubmit(event) {
@@ -153,7 +173,7 @@ export function AttendancePage() {
       setMessage(`Asistencia procesada correctamente.${warning}`);
       setForm(initialForm);
       setSelectedClient(null);
-      await loadDashboard(search);
+      await loadDashboard(submittedSearch, clientPage);
     } catch (requestError) {
       setError(requestError.message || 'No fue posible registrar la asistencia');
     } finally {
@@ -266,6 +286,7 @@ export function AttendancePage() {
                 ))}
               </div>
             ) : null}
+            <Pagination currentPage={clientPagination.page} itemLabel="clientes" onPageChange={setClientPage} pageSize={clientPagination.limit} totalItems={clientPagination.totalItems} totalPages={clientPagination.totalPages} />
           </DataPanel>
 
           <DataPanel title="Ingresos del dia" subtitle="Registro de asistencia procesado hoy.">

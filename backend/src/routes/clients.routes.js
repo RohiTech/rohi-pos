@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { query } from '../config/db.js';
 import { validateCreateClientPayload, validateUpdateClientPayload } from '../utils/clients.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 
 const clientsRouter = Router();
 
@@ -37,38 +42,54 @@ function mapPostgresError(error) {
 
 clientsRouter.get('/', async (request, response, next) => {
   try {
-    const limit = Math.min(Number.parseInt(request.query.limit, 10) || 50, 100);
     const search = String(request.query.search || '').trim();
+    const activeFilter = String(request.query.active || '').trim();
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 8,
+      maxLimit: 100
+    });
 
     const params = [];
-    let whereClause = '';
+    const conditions = [];
 
     if (search) {
       params.push(`%${search}%`);
-      whereClause = `
-        WHERE
-          client_code ILIKE $1 OR
-          first_name ILIKE $1 OR
-          last_name ILIKE $1 OR
-          COALESCE(email, '') ILIKE $1 OR
-          COALESCE(phone, '') ILIKE $1
-      `;
+      conditions.push(
+        `(client_code ILIKE $${params.length} OR first_name ILIKE $${params.length} OR last_name ILIKE $${params.length} OR COALESCE(email, '') ILIKE $${params.length} OR COALESCE(phone, '') ILIKE $${params.length})`
+      );
     }
 
-    params.push(limit);
+    if (activeFilter === 'true' || activeFilter === 'false') {
+      params.push(activeFilter === 'true');
+      conditions.push(`is_active = $${params.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM clients
+       ${whereClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
 
     const result = await query(
       `${baseClientSelect}
        ${whereClause}
        ORDER BY id DESC
-       LIMIT $${params.length}`,
-      params
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
     );
 
     response.json({
       ok: true,
       count: result.rowCount,
-      data: result.rows
+      data: result.rows,
+      pagination: createPaginationMeta(totalItems, page, limit)
     });
   } catch (error) {
     next(error);

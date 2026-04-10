@@ -3,7 +3,7 @@ import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
-import { apiGet, apiPost, apiPut } from '../lib/api';
+import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatDate } from '../lib/format';
 
 const initialClientForm = {
@@ -25,6 +25,12 @@ export function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -36,8 +42,21 @@ export function ClientsPage() {
     setError('');
 
     try {
-      const response = await apiGet('/clients');
+      const query = buildQueryString({
+        search: search.trim(),
+        page: currentPage,
+        limit: PAGE_SIZE
+      });
+      const response = await apiGet(`/clients${query}`);
       setClients(response.data);
+      setPagination(
+        response.pagination || {
+          page: 1,
+          limit: PAGE_SIZE,
+          totalItems: response.data.length,
+          totalPages: Math.max(1, Math.ceil(response.data.length / PAGE_SIZE))
+        }
+      );
     } catch (requestError) {
       setError(requestError.message || 'No fue posible cargar clientes');
     } finally {
@@ -47,7 +66,7 @@ export function ClientsPage() {
 
   useEffect(() => {
     loadClients();
-  }, []);
+  }, [search, currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -126,24 +145,6 @@ export function ClientsPage() {
       setError(requestError.message || 'No fue posible actualizar el estado del cliente');
     }
   }
-
-  const filteredClients = clients.filter((client) => {
-    const term = search.trim().toLowerCase();
-
-    if (!term) {
-      return true;
-    }
-
-    return [client.client_code, client.first_name, client.last_name, client.email, client.phone]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(term));
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filteredClients.length / PAGE_SIZE));
-  const paginatedClients = filteredClients.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
 
   return (
     <div>
@@ -262,10 +263,10 @@ export function ClientsPage() {
             />
           </div>
           {loading ? <p className="text-sm text-brand-forest/70">Cargando clientes...</p> : null}
-          {!loading && !filteredClients.length ? (
+          {!loading && !clients.length ? (
             <EmptyState title="Sin resultados" description="No hay clientes que coincidan con la busqueda actual." />
           ) : null}
-          {filteredClients.length ? (
+          {clients.length ? (
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className="text-brand-forest/70">
@@ -279,7 +280,7 @@ export function ClientsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedClients.map((client) => (
+                  {clients.map((client) => (
                     <tr key={client.id} className="border-t border-brand-sand/60">
                       <td className="py-3 font-semibold text-brand-forest">{client.client_code}</td>
                       <td className="py-3">{client.first_name} {client.last_name}</td>
@@ -309,7 +310,7 @@ export function ClientsPage() {
               </table>
             </div>
           ) : null}
-          <Pagination currentPage={currentPage} itemLabel="clientes" onPageChange={setCurrentPage} pageSize={PAGE_SIZE} totalItems={filteredClients.length} totalPages={totalPages} />
+          <Pagination currentPage={pagination.page} itemLabel="clientes" onPageChange={setCurrentPage} pageSize={pagination.limit} totalItems={pagination.totalItems} totalPages={pagination.totalPages} />
         </DataPanel>
       )}
     </div>

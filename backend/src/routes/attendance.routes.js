@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../config/db.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 import { inferMembershipStatus } from '../utils/memberships.js';
 
 const attendanceRouter = Router();
@@ -107,6 +112,10 @@ async function getLatestMembershipForClient(clientId, dbClient = null) {
 attendanceRouter.get('/clients', async (request, response, next) => {
   try {
     const search = String(request.query.search || '').trim();
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 8,
+      maxLimit: 100
+    });
     const params = [];
     const conditions = [];
 
@@ -118,6 +127,16 @@ attendanceRouter.get('/clients', async (request, response, next) => {
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM clients c
+       ${whereClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
 
     const result = await query(
       `SELECT
@@ -140,11 +159,12 @@ attendanceRouter.get('/clients', async (request, response, next) => {
          ORDER BY end_date DESC, id DESC
          LIMIT 1
        ) m ON TRUE
-       LEFT JOIN membership_plans mp ON mp.id = m.plan_id
-       ${whereClause}
-       ORDER BY c.first_name ASC, c.last_name ASC
-       LIMIT 50`,
-      params
+        LEFT JOIN membership_plans mp ON mp.id = m.plan_id
+        ${whereClause}
+        ORDER BY c.first_name ASC, c.last_name ASC
+        LIMIT $${dataParams.length - 1}
+        OFFSET $${dataParams.length}`,
+      dataParams
     );
 
     response.json({
@@ -158,7 +178,8 @@ attendanceRouter.get('/clients', async (request, response, next) => {
           row.membership_status === 'cancelled' || !row.end_date
             ? row.membership_status
             : inferMembershipStatus(row.start_date, row.end_date)
-      }))
+      })),
+      pagination: createPaginationMeta(totalItems, page, limit)
     });
   } catch (error) {
     next(error);

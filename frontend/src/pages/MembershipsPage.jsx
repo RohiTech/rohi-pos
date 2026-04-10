@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
-import { apiGet, apiPost, apiPut } from '../lib/api';
+import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const initialPlanForm = {
@@ -45,6 +45,7 @@ function addDays(dateValue, daysToAdd) {
 
 export function MembershipsPage() {
   const [activeView, setActiveView] = useState('membership-list');
+  const [planOptions, setPlanOptions] = useState([]);
   const [plans, setPlans] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [clients, setClients] = useState([]);
@@ -52,6 +53,18 @@ export function MembershipsPage() {
   const [membershipSearch, setMembershipSearch] = useState('');
   const [planPage, setPlanPage] = useState(1);
   const [membershipPage, setMembershipPage] = useState(1);
+  const [planPagination, setPlanPagination] = useState({
+    page: 1,
+    limit: PLAN_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
+  const [membershipPagination, setMembershipPagination] = useState({
+    page: 1,
+    limit: MEMBERSHIP_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
   const [plansLoading, setPlansLoading] = useState(true);
   const [membershipsLoading, setMembershipsLoading] = useState(true);
   const [planForm, setPlanForm] = useState(initialPlanForm);
@@ -62,32 +75,108 @@ export function MembershipsPage() {
   const [planSaving, setPlanSaving] = useState(false);
   const [membershipSaving, setMembershipSaving] = useState(false);
 
-  async function loadPageData() {
+  async function loadFormOptions() {
     setError('');
-    setPlansLoading(true);
-    setMembershipsLoading(true);
 
     try {
-      const [plansResponse, membershipsResponse, clientsResponse] = await Promise.all([
-        apiGet('/membership-plans'),
-        apiGet('/memberships'),
-        apiGet('/clients')
+      const [clientsResponse, plansResponse] = await Promise.all([
+        apiGet('/clients?active=true&limit=100'),
+        apiGet('/membership-plans?limit=100')
       ]);
 
-      setPlans(plansResponse.data);
-      setMemberships(membershipsResponse.data);
       setClients(clientsResponse.data.filter((client) => client.is_active));
+      setPlanOptions((currentPlans) => {
+        const fetchedPlans = plansResponse.data;
+
+        if (!editingMembershipId || !membershipForm.plan_id) {
+          return currentPlans.length ? currentPlans : fetchedPlans;
+        }
+
+        const selectedPlan = currentPlans.find(
+          (plan) => String(plan.id) === String(membershipForm.plan_id)
+        );
+
+        if (!selectedPlan || fetchedPlans.some((plan) => plan.id === selectedPlan.id)) {
+          return fetchedPlans;
+        }
+
+        return [...fetchedPlans, selectedPlan];
+      });
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible cargar la informacion');
+      setError(requestError.message || 'No fue posible cargar la informacion base');
+    }
+  }
+
+  async function loadPlans() {
+    setPlansLoading(true);
+    setError('');
+
+    try {
+      const query = buildQueryString({
+        search: planSearch.trim(),
+        page: planPage,
+        limit: PLAN_PAGE_SIZE
+      });
+      const response = await apiGet(`/membership-plans${query}`);
+      setPlans(response.data);
+      setPlanPagination(
+        response.pagination || {
+          page: 1,
+          limit: PLAN_PAGE_SIZE,
+          totalItems: response.data.length,
+          totalPages: Math.max(1, Math.ceil(response.data.length / PLAN_PAGE_SIZE))
+        }
+      );
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible cargar los planes');
     } finally {
       setPlansLoading(false);
+    }
+  }
+
+  async function loadMemberships() {
+    setMembershipsLoading(true);
+    setError('');
+
+    try {
+      const query = buildQueryString({
+        search: membershipSearch.trim(),
+        page: membershipPage,
+        limit: MEMBERSHIP_PAGE_SIZE
+      });
+      const response = await apiGet(`/memberships${query}`);
+      setMemberships(response.data);
+      setMembershipPagination(
+        response.pagination || {
+          page: 1,
+          limit: MEMBERSHIP_PAGE_SIZE,
+          totalItems: response.data.length,
+          totalPages: Math.max(1, Math.ceil(response.data.length / MEMBERSHIP_PAGE_SIZE))
+        }
+      );
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible cargar las membresias');
+    } finally {
       setMembershipsLoading(false);
     }
   }
 
+  async function loadPageData() {
+    setError('');
+    await Promise.all([loadFormOptions(), loadPlans(), loadMemberships()]);
+  }
+
   useEffect(() => {
-    loadPageData();
+    loadFormOptions();
   }, []);
+
+  useEffect(() => {
+    loadPlans();
+  }, [planSearch, planPage]);
+
+  useEffect(() => {
+    loadMemberships();
+  }, [membershipSearch, membershipPage]);
 
   useEffect(() => {
     setPlanPage(1);
@@ -114,7 +203,7 @@ export function MembershipsPage() {
       };
 
       if (!editingMembershipId && name === 'plan_id') {
-        const selectedPlan = plans.find((plan) => String(plan.id) === value);
+        const selectedPlan = planOptions.find((plan) => String(plan.id) === value);
 
         if (selectedPlan) {
           const startDate = current.start_date || formatDateInput(new Date());
@@ -127,7 +216,7 @@ export function MembershipsPage() {
       }
 
       if (!editingMembershipId && name === 'start_date' && current.plan_id) {
-        const selectedPlan = plans.find((plan) => String(plan.id) === String(current.plan_id));
+        const selectedPlan = planOptions.find((plan) => String(plan.id) === String(current.plan_id));
 
         if (selectedPlan && value) {
           nextForm.end_date = addDays(value, Number(selectedPlan.duration_days) - 1);
@@ -272,46 +361,6 @@ export function MembershipsPage() {
     }
   }
 
-  const filteredPlans = plans.filter((plan) => {
-    const term = planSearch.trim().toLowerCase();
-
-    if (!term) {
-      return true;
-    }
-
-    return [plan.name, plan.description, plan.duration_days, plan.price]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(term));
-  });
-
-  const filteredMemberships = memberships.filter((membership) => {
-    const term = membershipSearch.trim().toLowerCase();
-
-    if (!term) {
-      return true;
-    }
-
-    return [
-      membership.membership_number,
-      membership.client_code,
-      membership.client_first_name,
-      membership.client_last_name,
-      membership.plan_name,
-      membership.status
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(term));
-  });
-
-  const totalPlanPages = Math.max(1, Math.ceil(filteredPlans.length / PLAN_PAGE_SIZE));
-  const totalMembershipPages = Math.max(1, Math.ceil(filteredMemberships.length / MEMBERSHIP_PAGE_SIZE));
-
-  const paginatedPlans = filteredPlans.slice((planPage - 1) * PLAN_PAGE_SIZE, planPage * PLAN_PAGE_SIZE);
-  const paginatedMemberships = filteredMemberships.slice(
-    (membershipPage - 1) * MEMBERSHIP_PAGE_SIZE,
-    membershipPage * MEMBERSHIP_PAGE_SIZE
-  );
-
   return (
     <div>
       <PageHeader
@@ -385,7 +434,7 @@ export function MembershipsPage() {
                 <span className="text-sm font-semibold text-brand-forest">Plan</span>
                 <select className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" disabled={Boolean(editingMembershipId)} name="plan_id" onChange={handleMembershipChange} required value={membershipForm.plan_id}>
                   <option value="">Selecciona un plan</option>
-                  {plans.filter((plan) => plan.is_active || String(plan.id) === String(membershipForm.plan_id)).map((plan) => (
+                  {planOptions.filter((plan) => plan.is_active || String(plan.id) === String(membershipForm.plan_id)).map((plan) => (
                     <option key={plan.id} value={plan.id}>
                       {plan.name} - {formatCurrency(plan.price)}
                     </option>
@@ -445,10 +494,10 @@ export function MembershipsPage() {
             <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setPlanSearch(event.target.value)} placeholder="Buscar plan por nombre, descripcion o precio" value={planSearch} />
           </div>
           {plansLoading ? <p className="text-sm text-brand-forest/70">Cargando planes...</p> : null}
-          {!plansLoading && !filteredPlans.length ? <EmptyState title="Sin resultados" description="No hay planes que coincidan con la busqueda actual." /> : null}
-          {filteredPlans.length ? (
+          {!plansLoading && !plans.length ? <EmptyState title="Sin resultados" description="No hay planes que coincidan con la busqueda actual." /> : null}
+          {plans.length ? (
             <div className="grid gap-3">
-              {paginatedPlans.map((plan) => (
+              {plans.map((plan) => (
                 <article key={plan.id} className="rounded-2xl border border-brand-sand/70 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -472,7 +521,7 @@ export function MembershipsPage() {
               ))}
             </div>
           ) : null}
-          <Pagination currentPage={planPage} itemLabel="planes" onPageChange={setPlanPage} pageSize={PLAN_PAGE_SIZE} totalItems={filteredPlans.length} totalPages={totalPlanPages} />
+          <Pagination currentPage={planPagination.page} itemLabel="planes" onPageChange={setPlanPage} pageSize={planPagination.limit} totalItems={planPagination.totalItems} totalPages={planPagination.totalPages} />
         </DataPanel>
       ) : null}
 
@@ -482,10 +531,10 @@ export function MembershipsPage() {
             <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setMembershipSearch(event.target.value)} placeholder="Buscar por cliente, codigo, plan, numero o estado" value={membershipSearch} />
           </div>
           {membershipsLoading ? <p className="text-sm text-brand-forest/70">Cargando membresias...</p> : null}
-          {!membershipsLoading && !filteredMemberships.length ? <EmptyState title="Sin resultados" description="No hay membresias que coincidan con la busqueda actual." /> : null}
-          {filteredMemberships.length ? (
+          {!membershipsLoading && !memberships.length ? <EmptyState title="Sin resultados" description="No hay membresias que coincidan con la busqueda actual." /> : null}
+          {memberships.length ? (
             <div className="space-y-3">
-              {paginatedMemberships.map((membership) => (
+              {memberships.map((membership) => (
                 <div key={membership.id} className="rounded-2xl border border-brand-sand/70 px-4 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
@@ -524,7 +573,7 @@ export function MembershipsPage() {
               ))}
             </div>
           ) : null}
-          <Pagination currentPage={membershipPage} itemLabel="membresias" onPageChange={setMembershipPage} pageSize={MEMBERSHIP_PAGE_SIZE} totalItems={filteredMemberships.length} totalPages={totalMembershipPages} />
+          <Pagination currentPage={membershipPagination.page} itemLabel="membresias" onPageChange={setMembershipPage} pageSize={membershipPagination.limit} totalItems={membershipPagination.totalItems} totalPages={membershipPagination.totalPages} />
         </DataPanel>
       ) : null}
     </div>

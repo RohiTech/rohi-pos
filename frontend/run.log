@@ -3,8 +3,19 @@
 > vite --host 0.0.0.0
 
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1122[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1154[22m[2m[0m ms[22m
 
   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.0.19:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.0.16:[1m5173[22m/[39m
 [2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+[2m4:07:35 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/context/SettingsContext.jsx, /src/index.css, /src/context/AuthContext.jsx, /src/pages/ClientsPage.jsx, /src/pages/AttendancePage.jsx, /src/pages/DashboardPage.jsx, /src/pages/MembershipsPage.jsx, /src/pages/PosPage.jsx[22m
+[2m4:07:35 p.m.[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/context/SettingsContext.jsx[22m Could not Fast Refresh ("useSettings" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:07:35 p.m.[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/context/SettingsContext.jsx[22m
+[2m4:07:35 p.m.[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/context/AuthContext.jsx[22m Could not Fast Refresh ("useAuth" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m4:07:35 p.m.[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/context/AuthContext.jsx[22m
+[2m4:07:54 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/ClientsPage.jsx, /src/index.css[22m
+[2m4:08:36 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MembershipsPage.jsx, /src/index.css[22m
+[2m4:08:55 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/MembershipsPage.jsx, /src/index.css[22m
+[2m4:09:13 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/AttendancePage.jsx, /src/index.css[22m
+[2m4:10:15 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/PosPage.jsx, /src/index.css[22m
+[2m4:10:43 p.m.[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/PosPage.jsx, /src/index.css[22m

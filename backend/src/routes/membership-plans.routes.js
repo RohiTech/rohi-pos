@@ -4,7 +4,12 @@ import {
   validateCreateMembershipPlanPayload,
   validateUpdateMembershipPlanPayload
 } from '../utils/membership-plans.js';
-import { createHttpError, parsePositiveInteger } from '../utils/http.js';
+import {
+  createHttpError,
+  createPaginationMeta,
+  parsePaginationParams,
+  parsePositiveInteger
+} from '../utils/http.js';
 
 const membershipPlansRouter = Router();
 
@@ -33,25 +38,52 @@ function mapPostgresError(error) {
 membershipPlansRouter.get('/', async (request, response, next) => {
   try {
     const onlyActive = request.query.active === 'true';
+    const search = String(request.query.search || '').trim();
+    const { page, limit, offset } = parsePaginationParams(request.query, {
+      defaultLimit: 6,
+      maxLimit: 100
+    });
     const params = [];
-    let whereClause = '';
+    const conditions = [];
 
     if (onlyActive) {
       params.push(true);
-      whereClause = 'WHERE is_active = $1';
+      conditions.push(`is_active = $${params.length}`);
     }
+
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(
+        `(name ILIKE $${params.length} OR COALESCE(description, '') ILIKE $${params.length} OR CAST(duration_days AS TEXT) ILIKE $${params.length} OR CAST(price AS TEXT) ILIKE $${params.length})`
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM membership_plans
+       ${whereClause}`,
+      params
+    );
+
+    const totalItems = countResult.rows[0]?.total || 0;
+    const dataParams = [...params, limit, offset];
 
     const result = await query(
       `${basePlanSelect}
        ${whereClause}
-       ORDER BY duration_days ASC, id DESC`,
-      params
+       ORDER BY duration_days ASC, id DESC
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
     );
 
     response.json({
       ok: true,
       count: result.rowCount,
-      data: result.rows
+      data: result.rows,
+      pagination: createPaginationMeta(totalItems, page, limit)
     });
   } catch (error) {
     next(error);
