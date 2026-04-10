@@ -51,6 +51,7 @@ export function MembershipsPage() {
   const [clients, setClients] = useState([]);
   const [planSearch, setPlanSearch] = useState('');
   const [membershipSearch, setMembershipSearch] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
   const [planPage, setPlanPage] = useState(1);
   const [membershipPage, setMembershipPage] = useState(1);
   const [planPagination, setPlanPagination] = useState({
@@ -225,6 +226,18 @@ export function MembershipsPage() {
 
       return nextForm;
     });
+  }
+
+  function handleClientSearchChange(event) {
+    setClientSearch(event.target.value);
+  }
+
+  function selectClient(client) {
+    setMembershipForm((current) => ({
+      ...current,
+      client_id: String(client.id)
+    }));
+    setClientSearch(`${client.client_code} - ${client.first_name} ${client.last_name}`);
   }
 
   function resetPlanForm() {
@@ -419,16 +432,50 @@ export function MembershipsPage() {
         <DataPanel title={editingMembershipId ? 'Editar membresia' : 'Registrar membresia'} subtitle="Asigna un plan a un cliente activo.">
           <form className="grid gap-4" onSubmit={handleMembershipSubmit}>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2">
+                      <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Cliente</span>
-                <select className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" disabled={Boolean(editingMembershipId)} name="client_id" onChange={handleMembershipChange} required value={membershipForm.client_id}>
-                  <option value="">Selecciona un cliente</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.client_code} - {client.first_name} {client.last_name}
-                    </option>
-                  ))}
-                </select>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  disabled={Boolean(editingMembershipId)}
+                  name="client_search"
+                  onChange={handleClientSearchChange}
+                  placeholder="Buscar cliente por codigo, nombre o telefono"
+                  value={clientSearch}
+                  type="text"
+                />
+                {!editingMembershipId ? (
+                  <div className="max-h-56 overflow-auto rounded-2xl border border-brand-sand bg-white shadow-sm">
+                    {clients.filter((client) => {
+                      const search = clientSearch.trim().toLowerCase();
+                      if (!search) return true;
+                      const clientName = `${client.first_name || ''} ${client.last_name || ''}`.toLowerCase();
+                      const clientCode = String(client.client_code || '').toLowerCase();
+                      const clientPhone = String(client.phone_number || '').toLowerCase();
+                      return clientName.includes(search) || clientCode.includes(search) || clientPhone.includes(search);
+                    }).slice(0, 8).map((client) => (
+                      <button
+                        className="w-full border-b border-brand-sand/50 px-4 py-3 text-left text-sm text-brand-forest transition hover:bg-brand-cream/60"
+                        key={client.id}
+                        onClick={() => selectClient(client)}
+                        type="button"
+                      >
+                        <span className="font-semibold">{client.client_code} - {client.first_name} {client.last_name}</span>
+                        {client.phone_number ? <span className="block text-xs text-brand-forest/70">{client.phone_number}</span> : null}
+                      </button>
+                    ))}
+                    {!clients.length ? (
+                      <p className="px-4 py-3 text-sm text-brand-forest/70">Cargando clientes...</p>
+                    ) : null}
+                    {clients.length && !clients.some((client) => String(client.id) === String(membershipForm.client_id)) ? null : null}
+                  </div>
+                ) : (
+                  <input
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    disabled
+                    readOnly
+                    value={clients.find((client) => String(client.id) === String(membershipForm.client_id)) ? `${clients.find((client) => String(client.id) === String(membershipForm.client_id)).client_code} - ${clients.find((client) => String(client.id) === String(membershipForm.client_id)).first_name} ${clients.find((client) => String(client.id) === String(membershipForm.client_id)).last_name}` : ''}
+                  />
+                )}
               </label>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Plan</span>

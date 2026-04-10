@@ -8,6 +8,8 @@ import { ClientsPage } from './pages/ClientsPage';
 import { LoginPage } from './pages/LoginPage';
 import { MembershipsPage } from './pages/MembershipsPage';
 import { PosPage } from './pages/PosPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { SecurityPage } from './pages/SecurityPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
@@ -20,6 +22,8 @@ export function App() {
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/clients" element={<ClientsPage />} />
           <Route path="/memberships" element={<MembershipsPage />} />
+          <Route path="/security" element={<SecurityPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route
             path="/pos"

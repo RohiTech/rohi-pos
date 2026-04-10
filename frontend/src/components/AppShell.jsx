@@ -8,6 +8,8 @@ const navigation = [
   { to: '/clients', label: 'Clientes', shortLabel: 'CL' },
   { to: '/memberships', label: 'Membresias', shortLabel: 'MB' },
   { to: '/pos', label: 'POS', shortLabel: 'POS' },
+  { to: '/security', label: 'Seguridad', shortLabel: 'SEG' },
+  { to: '/reports', label: 'Reportes', shortLabel: 'REP' },
   { to: '/settings', label: 'Configuracion', shortLabel: 'CFG' }
 ];
 

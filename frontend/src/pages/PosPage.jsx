@@ -172,6 +172,7 @@ export function PosPage() {
   const [removeProductImage, setRemoveProductImage] = useState(false);
   const [inventoryForm, setInventoryForm] = useState(initialInventoryForm);
   const [saleForm, setSaleForm] = useState(initialSaleForm);
+  const [clientSearch, setClientSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingInventory, setSavingInventory] = useState(false);
@@ -397,6 +398,26 @@ export function PosPage() {
     }));
   }
 
+  function handleClientSearchChange(event) {
+    const { value } = event.target;
+    setClientSearch(value);
+
+    if (saleForm.client_id) {
+      setSaleForm((current) => ({
+        ...current,
+        client_id: ''
+      }));
+    }
+  }
+
+  function selectSaleClient(client) {
+    setSaleForm((current) => ({
+      ...current,
+      client_id: String(client.id)
+    }));
+    setClientSearch(`${client.client_code} - ${client.first_name} ${client.last_name}`);
+  }
+
   function handleSaleChange(event) {
     const { name, value } = event.target;
     setSaleForm((current) => ({
@@ -434,6 +455,7 @@ export function PosPage() {
 
   function clearTicket() {
     setSaleForm(initialSaleForm);
+    setClientSearch('');
     setSelectedLineIndex(0);
     setKeypadTarget('amount-tendered');
     setAmountTendered('');
@@ -1239,19 +1261,40 @@ export function PosPage() {
 
                 <label className="grid gap-2">
                   <span className="text-sm font-semibold text-brand-forest">Cliente opcional</span>
-                  <select
+                  <input
                     className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                    name="client_id"
-                    onChange={handleSaleChange}
-                    value={saleForm.client_id}
-                  >
-                    <option value="">Venta sin cliente asignado</option>
-                    {activeClients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.client_code} - {client.first_name} {client.last_name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Buscar cliente por codigo, nombre o telefono"
+                    type="text"
+                    value={clientSearch}
+                    onChange={handleClientSearchChange}
+                  />
+                  <div className="max-h-56 overflow-auto rounded-2xl border border-brand-sand bg-white shadow-sm">
+                    {(activeClients
+                      .filter((client) => {
+                        const search = clientSearch.trim().toLowerCase();
+                        if (!search) return true;
+                        const clientName = `${client.first_name || ''} ${client.last_name || ''}`.toLowerCase();
+                        const clientCode = String(client.client_code || '').toLowerCase();
+                        const clientPhone = String(client.phone_number || '').toLowerCase();
+                        return clientName.includes(search) || clientCode.includes(search) || clientPhone.includes(search);
+                      })
+                      .slice(0, 8)
+                      .map((client) => (
+                        <button
+                          className="w-full border-b border-brand-sand/50 px-4 py-3 text-left text-sm text-brand-forest transition hover:bg-brand-cream/60"
+                          key={client.id}
+                          onClick={() => selectSaleClient(client)}
+                          type="button"
+                        >
+                          <span className="font-semibold">{client.client_code} - {client.first_name} {client.last_name}</span>
+                          {client.phone_number ? <span className="block text-xs text-brand-forest/70">{client.phone_number}</span> : null}
+                        </button>
+                      ))
+                    )}
+                    {!activeClients.length ? (
+                      <p className="px-4 py-3 text-sm text-brand-forest/70">Cargando clientes...</p>
+                    ) : null}
+                  </div>
                 </label>
 
                 <div className="grid gap-4">

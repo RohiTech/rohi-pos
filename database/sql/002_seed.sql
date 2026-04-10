@@ -24,7 +24,7 @@ SELECT
     'Administrator',
     'admin@rohipos.local',
     'admin',
-    '$2b$12$replace_with_real_bcrypt_hash',
+    '$2b$12$Bt6SIlucA5OXC2122V4cgOu6mmzQ4.a16izXo6dUxZo5lImJEF3LC',
     '00000000'
 FROM roles r
 WHERE r.name = 'admin'
