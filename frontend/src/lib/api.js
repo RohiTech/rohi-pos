@@ -102,3 +102,5 @@ export async function apiPutForm(path, formData) {
 
   return handleResponse(response);
 }
+
+export { authToken }; // Exportar el token para uso en otras partes

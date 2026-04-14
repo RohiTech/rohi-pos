@@ -12,6 +12,7 @@ import { rolesRouter } from './roles.routes.js';
 import { salesRouter } from './sales.routes.js';
 import { settingsRouter } from './settings.routes.js';
 import { usersRouter } from './users.routes.js';
+import reportsRouter from './reports.routes.js';
 
 const apiRouter = Router();
 
@@ -28,5 +29,6 @@ apiRouter.use('/products', productsRouter);
 apiRouter.use('/roles', rolesRouter);
 apiRouter.use('/sales', salesRouter);
 apiRouter.use('/users', usersRouter);
+apiRouter.use('/reports', reportsRouter);
 
 export { apiRouter };

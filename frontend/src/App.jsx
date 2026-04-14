@@ -11,6 +11,7 @@ import { PosPage } from './pages/PosPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SecurityPage } from './pages/SecurityPage';
 import { SettingsPage } from './pages/SettingsPage';
+import DailySalesReport from './pages/DailySalesReport';
 
 export function App() {
   return (
@@ -33,6 +34,7 @@ export function App() {
               </RouteErrorBoundary>
             }
           />
+          <Route path="/daily-sales-report" element={<DailySalesReport />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
