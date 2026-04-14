@@ -27,7 +27,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     // Encabezado
     doc.fontSize(18).text('Reporte de Ventas Diarias', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString()}`);
+    doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString()}`, 20);
     doc.moveDown();
 
     if (rows.length === 0) {
@@ -36,26 +36,26 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       // Titulos de columna alineados
       const startY = doc.y;
       doc.font('Helvetica-Bold');
-      doc.text('N° Venta', 60, startY, { width: 100, align: 'left' });
-      doc.text('Total (C$)', 160, startY, { width: 100, align: 'right' });
-      doc.text('Hora', 270, startY, { width: 100, align: 'center' });
-      doc.text('Cajero', 370, startY, { width: 100, align: 'center' });
+      doc.text('N° Venta', 20, startY, { width: 100, align: 'left' });
+      doc.text('Total (C$)', 120, startY, { width: 100, align: 'right' });
+      doc.text('Hora', 230, startY, { width: 100, align: 'center' });
+      doc.text('Cajero', 330, startY, { width: 100, align: 'center' });
       doc.moveDown(1);
       doc.font('Helvetica');
       rows.forEach(row => {
         const y = doc.y;
-        doc.text(row.sale_number, 60, y, { width: 100, align: 'left' });
-        doc.text(`C$${Number(row.total).toFixed(2)}`, 160, y, { width: 100, align: 'right' });
-        doc.text(new Date(row.sold_at).toLocaleTimeString(), 270, y, { width: 100, align: 'center' });
-        doc.text(String(row.cashier_user_id), 370, y, { width: 100, align: 'center' });
+        doc.text(row.sale_number, 20, y, { width: 100, align: 'left' });
+        doc.text(`C$${Number(row.total).toFixed(2)}`, 120, y, { width: 100, align: 'right' });
+        doc.text(new Date(row.sold_at).toLocaleTimeString(), 230, y, { width: 100, align: 'center' });
+        doc.text(String(row.cashier_user_id), 330, y, { width: 100, align: 'center' });
         doc.moveDown(0.5);
       });
       doc.moveDown(1);
       doc.font('Helvetica-Bold');
-      doc.text('Totales:', 60, doc.y, { continued: true });
+      doc.text('Totales:', 20, doc.y, { continued: true });
       doc.font('Helvetica');
-      doc.text(`Cantidad de ventas: ${totalVentas}`, 160, doc.y, { continued: true });
-      doc.text(`Monto total: C$${montoTotal.toFixed(2)}`, 320, doc.y);
+      doc.text(`Cantidad Ventas: ${totalVentas}`, 120, doc.y, { continued: true });
+      doc.text(`Monto Total: C$${montoTotal.toFixed(2)}`, 280, doc.y);
     }
 
     // Pie de página personalizado
