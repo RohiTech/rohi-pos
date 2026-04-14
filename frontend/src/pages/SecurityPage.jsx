@@ -217,7 +217,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Nombre</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="first_name"
                   onChange={handleUserFormChange}
                   required
@@ -230,7 +230,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Apellido</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="last_name"
                   onChange={handleUserFormChange}
                   required
@@ -245,7 +245,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Correo</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="email"
                   onChange={handleUserFormChange}
                   required
@@ -258,7 +258,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Usuario</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="username"
                   onChange={handleUserFormChange}
                   required
@@ -273,7 +273,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Contraseña</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="password"
                   onChange={handleUserFormChange}
                   type="password"
@@ -286,7 +286,7 @@ export function SecurityPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Teléfono</span>
                 <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-3"
                   name="phone"
                   onChange={handleUserFormChange}
                   type="tel"
