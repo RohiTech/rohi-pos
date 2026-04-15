@@ -62,21 +62,31 @@ export function AttendancePage() {
         limit: 8
       });
 
-      const [summaryResponse, checkinsResponse, clientsResponse] = await Promise.all([
+      const [summaryResponse, checkinsResponse, attendanceClientsResponse, clientsResponse] = await Promise.all([
         apiGet('/attendance/summary'),
         apiGet('/attendance/checkins'),
-        apiGet(`/attendance/clients${querySuffix}`)
+        apiGet(`/attendance/clients${querySuffix}`),
+        apiGet(`/clients${querySuffix}`)
       ]);
+
+      const clientsPhotoById = new Map(
+        (clientsResponse.data || []).map((client) => [String(client.id), client.photo_url || null])
+      );
+
+      const attendanceClients = (attendanceClientsResponse.data || []).map((client) => ({
+        ...client,
+        photo_url: client.photo_url || clientsPhotoById.get(String(client.id)) || null
+      }));
 
       setSummary(summaryResponse.data);
       setCheckins(checkinsResponse.data);
-      setClients(clientsResponse.data);
+      setClients(attendanceClients);
       setClientPagination(
-        clientsResponse.pagination || {
+        attendanceClientsResponse.pagination || {
           page: 1,
           limit: 8,
-          totalItems: clientsResponse.data.length,
-          totalPages: Math.max(1, Math.ceil(clientsResponse.data.length / 8))
+          totalItems: attendanceClients.length,
+          totalPages: Math.max(1, Math.ceil(attendanceClients.length / 8))
         }
       );
     } catch (requestError) {
