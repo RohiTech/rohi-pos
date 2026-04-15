@@ -1,9 +1,52 @@
 
 import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
 import { Router } from 'express';
 import { query } from '../config/db.js';
 
 const reportsRouter = Router();
+
+function getImageBufferFromDataUrl(dataUrl) {
+  const value = String(dataUrl || '').trim();
+  const match = value.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return {
+      mimeType: match[1],
+      buffer: Buffer.from(match[2], 'base64')
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function inferMembershipStatus(startDate, endDate, persistedStatus) {
+  if (!startDate || !endDate) {
+    return persistedStatus || 'sin membresia';
+  }
+
+  if (persistedStatus === 'cancelled') {
+    return 'cancelada';
+  }
+
+  const today = new Date();
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (today < start) {
+    return 'pendiente';
+  }
+
+  if (today > end) {
+    return 'expirada';
+  }
+
+  return 'activa';
+}
 
 // Reporte de ventas por producto en PDF
 reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
@@ -148,6 +191,132 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
       //doc.fontSize(8).text('Módulo: Reportes', doc.page.width - 120, bottom + 12, { align: 'left' });
     }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/membership-card/client/:clientId/pdf', async (req, res, next) => {
+  try {
+    const clientId = Number.parseInt(req.params.clientId, 10);
+
+    if (!Number.isInteger(clientId) || clientId <= 0) {
+      return res.status(400).json({ message: 'clientId debe ser un entero positivo' });
+    }
+
+    const result = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.email,
+         c.phone,
+         c.photo_url,
+         c.is_active,
+         m.membership_number,
+         m.start_date,
+         m.end_date,
+         m.status AS membership_status,
+         mp.name AS plan_name
+       FROM clients c
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM memberships
+         WHERE client_id = c.id
+         ORDER BY end_date DESC, id DESC
+         LIMIT 1
+       ) m ON TRUE
+       LEFT JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE c.id = $1`,
+      [clientId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Cliente no encontrado' });
+    }
+
+    const client = result.rows[0];
+    const effectiveStatus = inferMembershipStatus(
+      client.start_date,
+      client.end_date,
+      client.membership_status
+    );
+
+    const doc = new PDFDocument({ margin: 32, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="carnet_membresia_${client.client_code || client.id}.pdf"`
+    );
+    doc.pipe(res);
+
+    doc.roundedRect(70, 120, 460, 260, 18).lineWidth(1).strokeColor('#d6c9ad').stroke();
+    doc.rect(70, 120, 460, 48).fill('#18473d');
+
+    doc
+      .fillColor('#ffffff')
+      .fontSize(18)
+      .font('Helvetica-Bold')
+      .text('ROHIPOS - CARNET DE MEMBRESIA', 90, 136, { width: 420, align: 'left' });
+
+    const qrDataUrl = await QRCode.toDataURL(String(client.client_code || client.id), {
+      width: 420,
+      margin: 1,
+      errorCorrectionLevel: 'M'
+    });
+    const qrImage = getImageBufferFromDataUrl(qrDataUrl);
+
+    doc.roundedRect(90, 186, 120, 144, 8).lineWidth(0.8).strokeColor('#d6c9ad').stroke();
+    if (qrImage?.buffer) {
+      doc.image(qrImage.buffer, 96, 202, { fit: [108, 108], align: 'center', valign: 'center' });
+    }
+    doc
+      .fillColor('#6b7280')
+      .fontSize(9)
+      .font('Helvetica')
+      .text('QR de cliente', 90, 316, { width: 120, align: 'center' });
+
+    doc.fillColor('#18473d').fontSize(11).font('Helvetica-Bold');
+    doc.text('Codigo', 230, 188);
+    doc.text('Cliente', 230, 215);
+    doc.text('Plan', 230, 242);
+    doc.text('Numero membresia', 230, 269);
+    doc.text('Vigencia', 230, 296);
+    doc.text('Estado', 230, 323);
+
+    doc.fillColor('#1f2937').fontSize(12).font('Helvetica');
+    doc.text(client.client_code || '--', 360, 188, { width: 150, align: 'left' });
+    doc.text(`${client.first_name || ''} ${client.last_name || ''}`.trim() || '--', 360, 215, {
+      width: 150,
+      align: 'left'
+    });
+    doc.text(client.plan_name || 'Sin plan activo', 360, 242, { width: 150, align: 'left' });
+    doc.text(client.membership_number || '--', 360, 269, { width: 150, align: 'left' });
+    doc.text(
+      client.start_date && client.end_date
+        ? `${new Date(client.start_date).toLocaleDateString('es-NI')} - ${new Date(
+            client.end_date
+          ).toLocaleDateString('es-NI')}`
+        : 'No definida',
+      360,
+      296,
+      { width: 150, align: 'left' }
+    );
+    doc.text(effectiveStatus, 360, 323, { width: 150, align: 'left' });
+
+    doc
+      .fillColor('#6b7280')
+      .fontSize(10)
+      .font('Helvetica')
+      .text(
+        `Emitido por: ${req.user?.username || req.user?.email || 'sistema'}  |  Fecha: ${new Date().toLocaleDateString('es-NI')}`,
+        70,
+        402,
+        { width: 460, align: 'center' }
+      );
 
     doc.end();
   } catch (err) {

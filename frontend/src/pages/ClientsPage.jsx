@@ -3,9 +3,10 @@ import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
-import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
+import { apiGet, apiPost, apiPut, buildQueryString, authToken } from '../lib/api';
 import { formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
+import QRCode from 'qrcode';
 
 const MAX_CLIENT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_CLIENT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -45,6 +46,7 @@ const initialClientForm = {
 };
 
 const PAGE_SIZE = 8;
+const REPORTS_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 export function ClientsPage() {
   const [activeView, setActiveView] = useState('list');
@@ -61,6 +63,9 @@ export function ClientsPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [qrGenerating, setQrGenerating] = useState(false);
   const [editingClientId, setEditingClientId] = useState(null);
   const [form, setForm] = useState(initialClientForm);
 
@@ -105,6 +110,104 @@ export function ClientsPage() {
       ...current,
       [name]: type === 'checkbox' ? checked : value
     }));
+
+    if (name === 'client_code' && qrCodeDataUrl) {
+      setQrCodeDataUrl('');
+    }
+  }
+
+  async function generateClientQrCode(clientCode) {
+    const normalizedCode = String(clientCode || '').trim();
+
+    if (!normalizedCode) {
+      setError('Ingresa el codigo del cliente para generar el QR');
+      return;
+    }
+
+    setQrGenerating(true);
+    setError('');
+
+    try {
+      const qrDataUrl = await QRCode.toDataURL(normalizedCode, {
+        width: 360,
+        margin: 2,
+        errorCorrectionLevel: 'M'
+      });
+      setQrCodeDataUrl(qrDataUrl);
+    } catch (_error) {
+      setError('No fue posible generar el codigo QR del cliente');
+    } finally {
+      setQrGenerating(false);
+    }
+  }
+
+  function handleGenerateQr() {
+    generateClientQrCode(form.client_code);
+  }
+
+  function handleDownloadQr() {
+    if (!qrCodeDataUrl) {
+      return;
+    }
+
+    const anchor = document.createElement('a');
+    const normalizedCode = String(form.client_code || 'cliente').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    anchor.href = qrCodeDataUrl;
+    anchor.download = `qr_cliente_${normalizedCode}.png`;
+    anchor.click();
+  }
+
+  async function openMembershipCardPdf() {
+    if (!editingClientId) {
+      setError('Guarda el cliente antes de generar el carnet de membresia');
+      return;
+    }
+
+    const previewWindow = window.open('', '_blank');
+
+    if (!previewWindow) {
+      setError('El navegador bloqueo la ventana emergente del carnet. Habilita popups para este sitio.');
+      return;
+    }
+
+    previewWindow.document.write('<p style="font-family: sans-serif; padding: 16px;">Generando carnet...</p>');
+
+    setCardLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch(
+        `${REPORTS_API_URL}/reports/membership-card/client/${editingClientId}/pdf`,
+        {
+          headers: authToken
+            ? {
+                Authorization: `Bearer ${authToken}`
+              }
+            : {}
+        }
+      );
+
+      if (!response.ok) {
+        let message = 'No fue posible generar el carnet de membresia';
+        try {
+          const data = await response.json();
+          message = data.message || message;
+        } catch (_error) {
+          // ignore parse error and use default message
+        }
+        throw new Error(message);
+      }
+
+      const pdfBlob = await response.blob();
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      previewWindow.location.href = pdfUrl;
+      setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
+    } catch (requestError) {
+      previewWindow.close();
+      setError(requestError.message || 'No fue posible abrir el carnet de membresia');
+    } finally {
+      setCardLoading(false);
+    }
   }
 
   async function handlePhotoChange(event) {
@@ -146,6 +249,7 @@ export function ClientsPage() {
   function resetForm() {
     setEditingClientId(null);
     setForm(initialClientForm);
+    setQrCodeDataUrl('');
     setActiveView('form');
   }
 
@@ -164,7 +268,9 @@ export function ClientsPage() {
       is_active: Boolean(client.is_active)
     });
     setError('');
+    setQrCodeDataUrl('');
     setActiveView('form');
+    generateClientQrCode(client.client_code);
   }
 
   async function handleSubmit(event) {
@@ -191,6 +297,7 @@ export function ClientsPage() {
 
       setEditingClientId(null);
       setForm(initialClientForm);
+      setQrCodeDataUrl('');
       await loadClients();
       setActiveView('list');
     } catch (requestError) {
@@ -333,12 +440,34 @@ export function ClientsPage() {
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Codigo</span>
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="client_code" onChange={handleChange} required value={form.client_code} />
+                <div className="flex flex-wrap gap-2">
+                  <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60" disabled={qrGenerating || !String(form.client_code || '').trim()} onClick={handleGenerateQr} type="button">
+                    {qrGenerating ? 'Generando...' : 'Generar QR'}
+                  </button>
+                  {qrCodeDataUrl ? (
+                    <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={handleDownloadQr} type="button">
+                      Descargar QR
+                    </button>
+                  ) : null}
+                </div>
               </label>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Fecha de ingreso</span>
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="join_date" onChange={handleChange} type="date" value={form.join_date} />
               </label>
             </div>
+
+            {qrCodeDataUrl ? (
+              <div className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Codigo QR del cliente</span>
+                <img
+                  alt="Codigo QR del cliente"
+                  className="h-44 w-44 cursor-pointer rounded-2xl border border-brand-sand/70 bg-white p-2"
+                  onClick={() => window.open(qrCodeDataUrl)}
+                  src={qrCodeDataUrl}
+                />
+              </div>
+            ) : null}
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
@@ -413,6 +542,9 @@ export function ClientsPage() {
             <div className="flex flex-wrap gap-3">
               <button className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60" disabled={saving} type="submit">
                 {saving ? 'Guardando...' : editingClientId ? 'Actualizar cliente' : 'Crear cliente'}
+              </button>
+              <button className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-brand-forest disabled:opacity-60" disabled={cardLoading || !editingClientId} onClick={openMembershipCardPdf} type="button">
+                {cardLoading ? 'Generando carnet...' : 'Ver carnet PDF'}
               </button>
               <button className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-brand-forest" onClick={resetForm} type="button">
                 Limpiar
