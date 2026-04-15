@@ -19,6 +19,18 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function dataURLToBlob(dataURL) {
+  const arr = dataURL.split(',');
+  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/webp';
+  const bstr = atob(arr[1] || '');
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
+
 const initialClientForm = {
   client_code: '',
   first_name: '',
@@ -371,7 +383,16 @@ export function ClientsPage() {
               />
               {form.photo_url ? (
                 <div className="space-y-3">
-                  <img alt="Vista previa de cliente" className="h-44 w-full rounded-[1.5rem] object-cover" src={form.photo_url} />
+                  <img
+                    alt="Vista previa de cliente"
+                    className="h-44 w-full cursor-pointer rounded-[1.5rem] object-cover"
+                    onClick={() => {
+                      const blob = dataURLToBlob(form.photo_url);
+                      const url = URL.createObjectURL(blob);
+                      window.open(url);
+                    }}
+                    src={form.photo_url}
+                  />
                   <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={clearPhoto} type="button">
                     Quitar foto
                   </button>
