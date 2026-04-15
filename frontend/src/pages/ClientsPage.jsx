@@ -7,6 +7,18 @@ import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
 
+const MAX_CLIENT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_CLIENT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('No fue posible leer la imagen seleccionada'));
+    reader.readAsDataURL(file);
+  });
+}
+
 const initialClientForm = {
   client_code: '',
   first_name: '',
@@ -15,6 +27,7 @@ const initialClientForm = {
   phone: '',
   gender: '',
   join_date: '',
+  photo_url: '',
   notes: '',
   is_active: true
 };
@@ -82,6 +95,42 @@ export function ClientsPage() {
     }));
   }
 
+  async function handlePhotoChange(event) {
+    const file = event.target.files?.[0] || null;
+
+    if (!file) {
+      return;
+    }
+
+    if (!ALLOWED_CLIENT_IMAGE_TYPES.has(file.type)) {
+      setError('La foto debe ser JPG, PNG o WEBP');
+      return;
+    }
+
+    if (file.size > MAX_CLIENT_IMAGE_SIZE_BYTES) {
+      setError('La foto no debe superar 5 MB');
+      return;
+    }
+
+    try {
+      const photoDataUrl = await readFileAsDataUrl(file);
+      setForm((current) => ({
+        ...current,
+        photo_url: photoDataUrl
+      }));
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible cargar la foto del cliente');
+    }
+  }
+
+  function clearPhoto() {
+    setForm((current) => ({
+      ...current,
+      photo_url: ''
+    }));
+  }
+
   function resetForm() {
     setEditingClientId(null);
     setForm(initialClientForm);
@@ -98,6 +147,7 @@ export function ClientsPage() {
       phone: client.phone || '',
       gender: client.gender || '',
       join_date: client.join_date ? String(client.join_date).slice(0, 10) : '',
+      photo_url: client.photo_url || '',
       notes: client.notes || '',
       is_active: Boolean(client.is_active)
     });
@@ -117,6 +167,7 @@ export function ClientsPage() {
         phone: form.phone || null,
         gender: form.gender || null,
         join_date: form.join_date || null,
+        photo_url: form.photo_url || null,
         notes: form.notes || null
       };
 
@@ -311,6 +362,24 @@ export function ClientsPage() {
             </label>
 
             <label className="grid gap-2">
+              <span className="text-sm font-semibold text-brand-forest">Foto del cliente</span>
+              <input
+                accept="image/png,image/jpeg,image/webp"
+                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                onChange={handlePhotoChange}
+                type="file"
+              />
+              {form.photo_url ? (
+                <div className="space-y-3">
+                  <img alt="Vista previa de cliente" className="h-44 w-full rounded-[1.5rem] object-cover" src={form.photo_url} />
+                  <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={clearPhoto} type="button">
+                    Quitar foto
+                  </button>
+                </div>
+              ) : null}
+            </label>
+
+            <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Notas</span>
               <textarea className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="notes" onChange={handleChange} value={form.notes} />
             </label>
@@ -357,6 +426,7 @@ export function ClientsPage() {
               <table className="min-w-full text-left text-sm">
                 <thead className="text-brand-forest/70">
                   <tr>
+                    <th className="pb-3">Foto</th>
                     <th className="pb-3">Codigo</th>
                     <th className="pb-3">Nombre</th>
                     <th className="pb-3">Contacto</th>
@@ -368,6 +438,19 @@ export function ClientsPage() {
                 <tbody>
                   {clients.map((client) => (
                     <tr key={client.id} className="border-t border-brand-sand/60">
+                      <td className="py-3">
+                        {client.photo_url ? (
+                          <img
+                            alt={`${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente'}
+                            className="h-10 w-10 rounded-full border border-brand-sand/70 object-cover"
+                            src={client.photo_url}
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-xs font-semibold uppercase text-brand-forest">
+                            {`${client.first_name?.[0] || ''}${client.last_name?.[0] || ''}` || '--'}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 font-semibold text-brand-forest">{client.client_code}</td>
                       <td className="py-3">{client.first_name} {client.last_name}</td>
                       <td className="py-3">

@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
+import * as XLSX from 'xlsx';
 
 const initialPlanForm = {
   name: '',
@@ -75,6 +76,7 @@ export function MembershipsPage() {
   const [error, setError] = useState('');
   const [planSaving, setPlanSaving] = useState(false);
   const [membershipSaving, setMembershipSaving] = useState(false);
+  const [membershipExporting, setMembershipExporting] = useState(false);
 
   async function loadFormOptions() {
     setError('');
@@ -374,6 +376,92 @@ export function MembershipsPage() {
     }
   }
 
+  async function fetchAllMembershipsForExport() {
+    const trimmedSearch = membershipSearch.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+
+    const firstResponse = await apiGet(`/memberships${firstQuery}`);
+    const allMemberships = [...firstResponse.data];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(`/memberships${pageQuery}`);
+      allMemberships.push(...pageResponse.data);
+    }
+
+    return allMemberships;
+  }
+
+  async function handleExportMembershipsExcel() {
+    setError('');
+    setMembershipExporting(true);
+
+    try {
+      const exportMemberships = await fetchAllMembershipsForExport();
+
+      if (!exportMemberships.length) {
+        setError('No hay membresias para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportMemberships.map((membership) => ({
+        Cliente: `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim(),
+        'Codigo cliente': membership.client_code || '--',
+        Plan: membership.plan_name || '--',
+        'Numero membresia': membership.membership_number || '--',
+        Inicio: formatDate(membership.start_date),
+        Vence: formatDate(membership.end_date),
+        Estado: membership.status || '--',
+        Precio: formatCurrency(membership.price),
+        Descuento: formatCurrency(membership.discount),
+        'Monto pagado': formatCurrency(membership.amount_paid),
+        Saldo: formatCurrency(membership.balance_due),
+        Notas: membership.notes || '--'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 26 },
+        { wch: 16 },
+        { wch: 20 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 12 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 42 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Membresias');
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `membresias_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar membresias');
+    } finally {
+      setMembershipExporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -574,8 +662,16 @@ export function MembershipsPage() {
 
       {activeView === 'membership-list' ? (
         <DataPanel title="Membresias registradas" subtitle="Seguimiento de cliente, plan, estado y saldo pendiente.">
-          <div className="mb-4">
-            <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setMembershipSearch(event.target.value)} placeholder="Buscar por cliente, codigo, plan, numero o estado" value={membershipSearch} />
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <input className="min-w-72 flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setMembershipSearch(event.target.value)} placeholder="Buscar por cliente, codigo, plan, numero o estado" value={membershipSearch} />
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={membershipExporting || membershipsLoading}
+              onClick={handleExportMembershipsExcel}
+              type="button"
+            >
+              {membershipExporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
           </div>
           {membershipsLoading ? <p className="text-sm text-brand-forest/70">Cargando membresias...</p> : null}
           {!membershipsLoading && !memberships.length ? <EmptyState title="Sin resultados" description="No hay membresias que coincidan con la busqueda actual." /> : null}

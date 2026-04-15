@@ -251,16 +251,29 @@ export function AttendancePage() {
                     type="button"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
-                          {client.client_code}
-                        </p>
-                        <h3 className="mt-1 font-semibold text-brand-forest">
-                          {client.first_name} {client.last_name}
-                        </h3>
-                        <p className="mt-1 text-sm text-brand-forest/70">
-                          {client.plan_name || 'Sin plan registrado'}
-                        </p>
+                      <div className="flex items-start gap-3">
+                        {client.photo_url ? (
+                          <img
+                            alt={`${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente'}
+                            className="h-12 w-12 rounded-full border border-brand-sand/70 object-cover"
+                            src={client.photo_url}
+                          />
+                        ) : (
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-sm font-semibold uppercase text-brand-forest">
+                            {`${client.first_name?.[0] || ''}${client.last_name?.[0] || ''}` || '--'}
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
+                            {client.client_code}
+                          </p>
+                          <h3 className="mt-1 font-semibold text-brand-forest">
+                            {client.first_name} {client.last_name}
+                          </h3>
+                          <p className="mt-1 text-sm text-brand-forest/70">
+                            {client.plan_name || 'Sin plan registrado'}
+                          </p>
+                        </div>
                       </div>
                       {!client.is_active ? (
                         <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
@@ -332,12 +345,27 @@ export function AttendancePage() {
         >
           {selectedClient ? (
             <div className="mb-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
-                {selectedClient.client_code}
-              </p>
-              <h3 className="mt-1 font-semibold text-brand-forest">
-                {selectedClient.first_name} {selectedClient.last_name}
-              </h3>
+              <div className="flex items-start gap-3">
+                {selectedClient.photo_url ? (
+                  <img
+                    alt={`${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Cliente'}
+                    className="h-14 w-14 rounded-full border border-brand-sand/70 object-cover"
+                    src={selectedClient.photo_url}
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-sm font-semibold uppercase text-brand-forest">
+                    {`${selectedClient.first_name?.[0] || ''}${selectedClient.last_name?.[0] || ''}` || '--'}
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
+                    {selectedClient.client_code}
+                  </p>
+                  <h3 className="mt-1 font-semibold text-brand-forest">
+                    {selectedClient.first_name} {selectedClient.last_name}
+                  </h3>
+                </div>
+              </div>
               <p className="mt-2 text-sm text-brand-forest/70">
                 Plan: {selectedClient.plan_name || 'Sin membresia vigente'}
               </p>

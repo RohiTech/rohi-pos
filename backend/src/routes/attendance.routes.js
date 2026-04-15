@@ -144,6 +144,7 @@ attendanceRouter.get('/clients', async (request, response, next) => {
          c.client_code,
          c.first_name,
          c.last_name,
+        c.photo_url,
          c.phone,
          c.is_active,
          m.membership_number,

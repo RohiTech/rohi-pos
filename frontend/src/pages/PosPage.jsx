@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { apiGet, apiPost, apiPostForm, apiPutForm, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
+import * as XLSX from 'xlsx';
 
 function dataURLToBlob(dataURL) {
   const arr = dataURL.split(',');
@@ -177,6 +178,8 @@ export function PosPage() {
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingInventory, setSavingInventory] = useState(false);
   const [savingSale, setSavingSale] = useState(false);
+  const [productExporting, setProductExporting] = useState(false);
+  const [movementExporting, setMovementExporting] = useState(false);
 
   const productOptionsQuery = useApi(() => apiGet('/products?limit=100'), [refreshKey]);
   const productCatalogQuery = useApi(
@@ -542,6 +545,189 @@ export function PosPage() {
       setError(requestError.message || 'No fue posible registrar el movimiento');
     } finally {
       setSavingInventory(false);
+    }
+  }
+
+  async function fetchAllProductsForExport() {
+    const trimmedSearch = productSearch.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+
+    const firstResponse = await apiGet(`/products${firstQuery}`);
+    const allProducts = [...(firstResponse.data || [])];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(`/products${pageQuery}`);
+      allProducts.push(...(pageResponse.data || []));
+    }
+
+    return allProducts;
+  }
+
+  async function handleExportProductsExcel() {
+    clearMessages();
+    setProductExporting(true);
+
+    try {
+      const exportProducts = await fetchAllProductsForExport();
+
+      if (!exportProducts.length) {
+        setError('No hay productos para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportProducts.map((product) => ({
+        SKU: product.sku || '--',
+        Nombre: product.name || '--',
+        Categoria: product.category_name || 'Sin categoria',
+        'Codigo de barras': product.barcode || '--',
+        Venta: formatCurrency(product.sale_price),
+        Costo: formatCurrency(product.cost_price),
+        Stock: Number(product.stock_quantity || 0),
+        'Stock minimo': Number(product.minimum_stock || 0),
+        Unidad: product.unit_label || '--',
+        Estado: product.is_active ? 'Activo' : 'Inactivo',
+        Descripcion: product.description || '--'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 14 },
+        { wch: 26 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 40 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'CatalogoProductos');
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `catalogo_productos_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar productos');
+    } finally {
+      setProductExporting(false);
+    }
+  }
+
+  async function fetchAllInventoryMovementsForExport() {
+    if (!selectedProductId) {
+      return [];
+    }
+
+    const trimmedSearch = movementSearch.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+
+    const firstResponse = await apiGet(
+      `/products/${selectedProductId}/inventory-movements${firstQuery}`
+    );
+    const allMovements = [...(firstResponse.data || [])];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(
+        `/products/${selectedProductId}/inventory-movements${pageQuery}`
+      );
+      allMovements.push(...(pageResponse.data || []));
+    }
+
+    return allMovements;
+  }
+
+  async function handleExportMovementsExcel() {
+    clearMessages();
+
+    if (!selectedProductId) {
+      setError('Selecciona un producto para exportar su historial');
+      return;
+    }
+
+    setMovementExporting(true);
+
+    try {
+      const exportMovements = await fetchAllInventoryMovementsForExport();
+
+      if (!exportMovements.length) {
+        setError('No hay movimientos para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportMovements.map((movement) => ({
+        SKU: selectedProduct?.sku || '--',
+        Producto: selectedProduct?.name || '--',
+        Fecha: formatDate(movement.moved_at),
+        Tipo: movementLabels[movement.movement_type] || movement.movement_type,
+        Cantidad: Number(movement.quantity || 0),
+        Antes: Number(movement.previous_stock || 0),
+        Despues: Number(movement.new_stock || 0),
+        'Costo unitario': movement.unit_cost == null ? '--' : formatCurrency(movement.unit_cost),
+        Referencia: movement.reference_type
+          ? `${movement.reference_type}${movement.reference_id ? `#${movement.reference_id}` : ''}`
+          : '--',
+        Notas: movement.notes || '--'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 14 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 44 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'HistorialInventario');
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      const productSlug = String(selectedProduct?.sku || 'producto').replace(/[^a-zA-Z0-9_-]/g, '_');
+      XLSX.writeFile(workbook, `historial_inventario_${productSlug}_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar historial de inventario');
+    } finally {
+      setMovementExporting(false);
     }
   }
 
@@ -1631,13 +1817,21 @@ export function PosPage() {
           </DataPanel>
 
           <DataPanel title="Catalogo de productos" subtitle="Consulta rapida del inventario disponible para venta.">
-            <div className="mb-4">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
               <input
-                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                className="min-w-72 flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                 onChange={(event) => setProductSearch(event.target.value)}
                 placeholder="Buscar por SKU, nombre, categoria o codigo de barras"
                 value={productSearch}
               />
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                disabled={productExporting || productCatalogQuery.loading}
+                onClick={handleExportProductsExcel}
+                type="button"
+              >
+                {productExporting ? 'Exportando...' : 'Exportar Excel'}
+              </button>
             </div>
 
             {productCatalogQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando productos...</p> : null}
@@ -1820,7 +2014,7 @@ export function PosPage() {
                 : 'Selecciona un producto para revisar sus movimientos.'
             }
           >
-            <div className="mb-4 flex flex-col gap-3 md:flex-row">
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
               <select
                 className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:w-80"
                 onChange={(event) => {
@@ -1837,11 +2031,19 @@ export function PosPage() {
                 ))}
               </select>
               <input
-                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:flex-1"
                 onChange={(event) => setMovementSearch(event.target.value)}
                 placeholder="Buscar por tipo, referencia o nota"
                 value={movementSearch}
               />
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                disabled={movementExporting || movementsQuery.loading || !selectedProductId}
+                onClick={handleExportMovementsExcel}
+                type="button"
+              >
+                {movementExporting ? 'Exportando...' : 'Exportar Excel'}
+              </button>
             </div>
 
             {movementsQuery.loading ? (
