@@ -5,6 +5,7 @@ import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
 import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatDate } from '../lib/format';
+import * as XLSX from 'xlsx';
 
 const initialClientForm = {
   client_code: '',
@@ -34,6 +35,7 @@ export function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [editingClientId, setEditingClientId] = useState(null);
   const [form, setForm] = useState(initialClientForm);
 
@@ -146,6 +148,82 @@ export function ClientsPage() {
     }
   }
 
+  async function fetchAllClientsForExport() {
+    const trimmedSearch = search.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+
+    const firstResponse = await apiGet(`/clients${firstQuery}`);
+    const allClients = [...firstResponse.data];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(`/clients${pageQuery}`);
+      allClients.push(...pageResponse.data);
+    }
+
+    return allClients;
+  }
+
+  async function handleExportExcel() {
+    setError('');
+    setExporting(true);
+
+    try {
+      const exportClients = await fetchAllClientsForExport();
+
+      if (!exportClients.length) {
+        setError('No hay clientes para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportClients.map((client) => ({
+        Codigo: client.client_code || '--',
+        Nombre: `${client.first_name || ''} ${client.last_name || ''}`.trim(),
+        Correo: client.email || '--',
+        Telefono: client.phone || '--',
+        'Fecha ingreso': formatDate(client.join_date),
+        Estado: client.is_active ? 'Activo' : 'Inactivo',
+        Notas: client.notes || '--'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 14 },
+        { wch: 24 },
+        { wch: 30 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 12 },
+        { wch: 40 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Clientes');
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `clientes_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar clientes');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -254,13 +332,21 @@ export function ClientsPage() {
         </DataPanel>
       ) : (
         <DataPanel title="Clientes registrados" subtitle="Listado con edicion rapida y activacion o desactivacion.">
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <input
-              className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+              className="min-w-72 flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Buscar por codigo, nombre, correo o telefono"
               value={search}
             />
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={exporting || loading}
+              onClick={handleExportExcel}
+              type="button"
+            >
+              {exporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
           </div>
           {loading ? <p className="text-sm text-brand-forest/70">Cargando clientes...</p> : null}
           {!loading && !clients.length ? (
