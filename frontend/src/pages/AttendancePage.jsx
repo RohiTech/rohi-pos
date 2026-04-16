@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -17,6 +17,32 @@ const initialForm = {
   notes: ''
 };
 
+const SCAN_COOLDOWN_MS = 3000;
+
+function parseQrPayload(rawValue) {
+  const rawText = String(rawValue || '').trim();
+
+  if (!rawText) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(rawText);
+
+    if (typeof parsed === 'string') {
+      return parsed.trim();
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      return String(parsed.client_code || parsed.clientCode || parsed.code || parsed.client_id || parsed.clientId || '').trim();
+    }
+  } catch (_error) {
+    // The QR usually comes as plain text client code; ignore JSON parse errors.
+  }
+
+  return rawText;
+}
+
 function getAttendanceTone(status) {
   if (status === 'allowed') {
     return 'bg-emerald-100 text-emerald-700';
@@ -32,6 +58,8 @@ function getAttendanceTone(status) {
 export function AttendancePage() {
   const { user } = useAuth();
   const { settings } = useSettings();
+  const scannerInstanceId = useId().replace(/:/g, '');
+  const scannerElementId = `attendance-qr-scanner-${scannerInstanceId}`;
   const [search, setSearch] = useState('');
   const [submittedSearch, setSubmittedSearch] = useState('');
   const [clientPage, setClientPage] = useState(1);
@@ -48,8 +76,36 @@ export function AttendancePage() {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannerReady, setScannerReady] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const scannerRef = useRef(null);
+  const scanLockRef = useRef(false);
+  const lastScanRef = useRef({ value: '', timestamp: 0 });
+
+  async function stopScanner() {
+    const scanner = scannerRef.current;
+
+    if (!scanner) {
+      return;
+    }
+
+    scannerRef.current = null;
+
+    try {
+      await scanner.stop();
+    } catch (_stopError) {
+      // Ignore stop errors when the scanner was not running.
+    }
+
+    try {
+      await scanner.clear();
+    } catch (_clearError) {
+      // Ignore clear errors because the scanner container may already be gone.
+    }
+  }
 
   async function loadDashboard(searchTerm = '', page = 1) {
     setLoading(true);
@@ -154,6 +210,150 @@ export function AttendancePage() {
     setSubmittedSearch(search);
   }
 
+  async function resolveClientFromQr(decodedText) {
+    const parsedValue = parseQrPayload(decodedText);
+
+    if (!parsedValue) {
+      throw new Error('El QR no contiene un codigo de cliente valido.');
+    }
+
+    const querySuffix = buildQueryString({
+      search: parsedValue,
+      page: 1,
+      limit: 8
+    });
+
+    const clientsResponse = await apiGet(`/attendance/clients${querySuffix}`);
+    const foundClients = clientsResponse.data || [];
+
+    if (!foundClients.length) {
+      throw new Error(`No se encontro cliente para el codigo ${parsedValue}.`);
+    }
+
+    const normalized = parsedValue.toLowerCase();
+    const exactMatch = foundClients.find(
+      (client) => String(client.client_code || '').toLowerCase() === normalized
+    );
+
+    return exactMatch || foundClients[0];
+  }
+
+  async function registerAttendance(client, payloadOverrides = {}) {
+    const payload = {
+      client_id: Number(client.id),
+      checked_in_by_user_id: user.id,
+      access_type: payloadOverrides.access_type || form.access_type,
+      payment_method: payloadOverrides.payment_method || form.payment_method,
+      daily_pass_amount:
+        (payloadOverrides.access_type || form.access_type) === 'daily_pass'
+          ? Number((payloadOverrides.daily_pass_amount ?? form.daily_pass_amount) || 0)
+          : undefined,
+      notes: (payloadOverrides.notes ?? form.notes) || null
+    };
+
+    const response = await apiPost('/attendance/checkins', payload);
+    const warning = response.data.warning_message ? ` Aviso: ${response.data.warning_message}` : '';
+    setMessage(`Asistencia procesada correctamente.${warning}`);
+    setForm(initialForm);
+    setSelectedClient(null);
+    await loadDashboard(submittedSearch, clientPage);
+  }
+
+  async function handleQrScan(decodedText) {
+    const now = Date.now();
+    const lastScan = lastScanRef.current;
+
+    if (scanLockRef.current) {
+      return;
+    }
+
+    if (lastScan.value === decodedText && now - lastScan.timestamp < SCAN_COOLDOWN_MS) {
+      return;
+    }
+
+    scanLockRef.current = true;
+    lastScanRef.current = {
+      value: decodedText,
+      timestamp: now
+    };
+
+    setError('');
+    setMessage('');
+
+    try {
+      const client = await resolveClientFromQr(decodedText);
+      handleSelectClient(client);
+      await registerAttendance(client, {
+        access_type: 'membership',
+        notes: 'Check-in por escaneo QR'
+      });
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible procesar el QR');
+    } finally {
+      scanLockRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!scannerEnabled) {
+      setScannerReady(false);
+      setCameraError('');
+      stopScanner();
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function startScanner() {
+      setCameraError('');
+      setScannerReady(false);
+
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+
+        if (isCancelled) {
+          return;
+        }
+
+        const scanner = new Html5Qrcode(scannerElementId);
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: {
+              width: 220,
+              height: 220
+            },
+            aspectRatio: 1
+          },
+          (decodedText) => {
+            handleQrScan(decodedText);
+          },
+          () => {}
+        );
+
+        if (isCancelled) {
+          await stopScanner();
+          return;
+        }
+
+        setScannerReady(true);
+      } catch (_startError) {
+        setCameraError('No se pudo iniciar la camara. Verifica permisos y usa HTTPS o localhost.');
+        setScannerEnabled(false);
+      }
+    }
+
+    startScanner();
+
+    return () => {
+      isCancelled = true;
+      stopScanner();
+    };
+  }, [scannerEnabled, scannerElementId]);
+
   async function handleSubmit(event) {
     event.preventDefault();
 
@@ -167,23 +367,7 @@ export function AttendancePage() {
     setMessage('');
 
     try {
-      const response = await apiPost('/attendance/checkins', {
-        client_id: Number(form.client_id),
-        checked_in_by_user_id: user.id,
-        access_type: form.access_type,
-        payment_method: form.payment_method,
-        daily_pass_amount:
-          form.access_type === 'daily_pass'
-            ? Number(form.daily_pass_amount || 0)
-            : undefined,
-        notes: form.notes || null
-      });
-
-      const warning = response.data.warning_message ? ` Aviso: ${response.data.warning_message}` : '';
-      setMessage(`Asistencia procesada correctamente.${warning}`);
-      setForm(initialForm);
-      setSelectedClient(null);
-      await loadDashboard(submittedSearch, clientPage);
+      await registerAttendance(selectedClient);
     } catch (requestError) {
       setError(requestError.message || 'No fue posible registrar la asistencia');
     } finally {
@@ -236,6 +420,36 @@ export function AttendancePage() {
                 Buscar
               </button>
             </form>
+
+            <div className="mt-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/30 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-brand-forest/80">
+                  Escaneo QR con camara para buscar cliente y marcar asistencia automaticamente.
+                </p>
+                <button
+                  className="rounded-2xl bg-brand-forest px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white"
+                  onClick={() => setScannerEnabled((current) => !current)}
+                  type="button"
+                >
+                  {scannerEnabled ? 'Detener camara' : 'Escanear QR'}
+                </button>
+              </div>
+
+              {scannerEnabled ? (
+                <div className="mt-4">
+                  <div className="overflow-hidden rounded-2xl border border-brand-sand/70 bg-white p-2">
+                    <div id={scannerElementId} />
+                  </div>
+                  <p className="mt-2 text-xs text-brand-forest/70">
+                    {scannerReady
+                      ? 'Camara activa. Apunta al QR del carnet para registrar asistencia.'
+                      : 'Iniciando camara...'}
+                  </p>
+                </div>
+              ) : null}
+
+              {cameraError ? <p className="mt-3 text-sm text-rose-600">{cameraError}</p> : null}
+            </div>
 
             {loading ? <p className="mt-4 text-sm text-brand-forest/70">Cargando clientes...</p> : null}
 
