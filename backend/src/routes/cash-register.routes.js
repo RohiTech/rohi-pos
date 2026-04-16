@@ -1,0 +1,377 @@
+import PDFDocument from 'pdfkit';
+import { Router } from 'express';
+import { query, withTransaction } from '../config/db.js';
+import { createHttpError } from '../utils/http.js';
+
+const cashRegisterRouter = Router();
+
+function parseNonNegativeNumber(value, fieldName) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    throw createHttpError(400, `${fieldName} must be a non-negative number`);
+  }
+
+  return parsed;
+}
+
+async function getOrCreateOpenCashSession(userId, dbClient = null) {
+  const runner = dbClient || { query };
+
+  const openResult = await runner.query(
+    `SELECT id, opened_by_user_id, opening_amount, status, opened_at, closed_at
+     FROM cash_register_sessions
+     WHERE status = 'open'
+     ORDER BY opened_at DESC
+     LIMIT 1`
+  );
+
+  if (openResult.rowCount > 0) {
+    return openResult.rows[0];
+  }
+
+  const created = await runner.query(
+    `INSERT INTO cash_register_sessions (opened_by_user_id, opening_amount, status, notes)
+     VALUES ($1, $2, 'open', $3)
+     RETURNING id, opened_by_user_id, opening_amount, status, opened_at, closed_at`,
+    [userId, 0, 'Sesion abierta automaticamente por POS']
+  );
+
+  return created.rows[0];
+}
+
+async function buildCashSessionSummary(sessionId, dbClient = null) {
+  const runner = dbClient || { query };
+
+  const sessionResult = await runner.query(
+    `SELECT
+       cs.id,
+       cs.opened_by_user_id,
+       op.username AS opened_by_username,
+       cs.closed_by_user_id,
+       cl.username AS closed_by_username,
+       cs.opening_amount,
+       cs.closing_amount,
+       cs.expected_amount,
+       cs.difference_amount,
+       cs.opened_at,
+       cs.closed_at,
+       cs.status,
+       cs.notes
+     FROM cash_register_sessions cs
+     LEFT JOIN users op ON op.id = cs.opened_by_user_id
+     LEFT JOIN users cl ON cl.id = cs.closed_by_user_id
+     WHERE cs.id = $1`,
+    [sessionId]
+  );
+
+  if (sessionResult.rowCount === 0) {
+    throw createHttpError(404, 'Cash session not found');
+  }
+
+  const session = sessionResult.rows[0];
+
+  const receiptsIssuedResult = await runner.query(
+    `SELECT
+       s.id,
+       s.sale_number,
+       s.total,
+       s.sold_at,
+       u.username AS cashier_username
+     FROM sales s
+     LEFT JOIN users u ON u.id = s.cashier_user_id
+     WHERE s.cash_register_session_id = $1
+       AND s.status = 'completed'
+     ORDER BY s.sold_at DESC, s.id DESC
+     LIMIT 200`,
+    [sessionId]
+  );
+
+  const receiptsVoidedResult = await runner.query(
+    `SELECT
+       s.id,
+       s.sale_number,
+       s.total,
+       s.sold_at,
+       u.username AS cashier_username
+     FROM sales s
+     LEFT JOIN users u ON u.id = s.cashier_user_id
+     WHERE s.cash_register_session_id = $1
+       AND s.status = 'cancelled'
+     ORDER BY s.sold_at DESC, s.id DESC
+     LIMIT 200`,
+    [sessionId]
+  );
+
+  const paymentBreakdownResult = await runner.query(
+    `SELECT
+       p.payment_method,
+       COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total
+     FROM payments p
+     INNER JOIN sales s ON s.id = p.sale_id
+     WHERE s.cash_register_session_id = $1
+       AND s.status = 'completed'
+     GROUP BY p.payment_method`,
+    [sessionId]
+  );
+
+  const cashMovementsResult = await runner.query(
+    `SELECT
+       movement_type,
+       COALESCE(SUM(amount), 0)::numeric(12,2) AS total
+     FROM cash_movements
+     WHERE created_at >= $1
+       AND created_at <= COALESCE($2, NOW())
+     GROUP BY movement_type`,
+    [session.opened_at, session.closed_at]
+  );
+
+  const membershipIncomeResult = await runner.query(
+    `SELECT COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total
+     FROM payments p
+     LEFT JOIN sales s ON s.id = p.sale_id
+     WHERE (p.membership_id IS NOT NULL OR s.sale_type = 'membership')
+       AND p.paid_at >= $1
+       AND p.paid_at <= COALESCE($2, NOW())`,
+    [session.opened_at, session.closed_at]
+  );
+
+  const receiptsIssued = receiptsIssuedResult.rows;
+  const receiptsVoided = receiptsVoidedResult.rows;
+
+  const totalReceiptsIssued = receiptsIssued.length;
+  const totalReceiptsVoided = receiptsVoided.length;
+
+  const totalSalesAmount = receiptsIssued.reduce((sum, row) => sum + Number(row.total || 0), 0);
+
+  const paymentByMethod = {
+    cash: 0,
+    card: 0,
+    transfer: 0,
+    mobile: 0,
+    other: 0
+  };
+
+  paymentBreakdownResult.rows.forEach((row) => {
+    if (row.payment_method in paymentByMethod) {
+      paymentByMethod[row.payment_method] = Number(row.total || 0);
+    }
+  });
+
+  let cashIncome = 0;
+  let cashExpense = 0;
+
+  cashMovementsResult.rows.forEach((row) => {
+    if (row.movement_type === 'income') {
+      cashIncome = Number(row.total || 0);
+    }
+
+    if (row.movement_type === 'expense') {
+      cashExpense = Number(row.total || 0);
+    }
+  });
+
+  const membershipIncome = Number(membershipIncomeResult.rows[0]?.total || 0);
+  const expectedClosingAmount =
+    Number(session.opening_amount || 0) + paymentByMethod.cash + cashIncome - cashExpense;
+
+  return {
+    session: {
+      ...session,
+      opening_amount: Number(session.opening_amount || 0),
+      closing_amount: session.closing_amount == null ? null : Number(session.closing_amount),
+      expected_amount: session.expected_amount == null ? null : Number(session.expected_amount),
+      difference_amount: session.difference_amount == null ? null : Number(session.difference_amount)
+    },
+    metrics: {
+      total_receipts_issued: totalReceiptsIssued,
+      total_receipts_voided: totalReceiptsVoided,
+      total_sales_amount: totalSalesAmount,
+      income_by_payment_method: paymentByMethod,
+      cash_income: cashIncome,
+      cash_expense: cashExpense,
+      membership_income: membershipIncome,
+      expected_closing_amount: expectedClosingAmount
+    },
+    receipts_issued: receiptsIssued,
+    receipts_voided: receiptsVoided
+  };
+}
+
+cashRegisterRouter.get('/current/summary', async (request, response, next) => {
+  try {
+    const userId = Number(request.user?.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw createHttpError(401, 'User session is invalid');
+    }
+
+    const session = await getOrCreateOpenCashSession(userId);
+    const summary = await buildCashSessionSummary(session.id);
+
+    response.json({ ok: true, data: summary });
+  } catch (error) {
+    next(error);
+  }
+});
+
+cashRegisterRouter.get('/current/summary/pdf', async (request, response, next) => {
+  try {
+    const userId = Number(request.user?.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw createHttpError(401, 'User session is invalid');
+    }
+
+    const session = await getOrCreateOpenCashSession(userId);
+    const summary = await buildCashSessionSummary(session.id);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', 'attachment; filename="cierre_caja_previo.pdf"');
+    doc.pipe(response);
+
+    doc.fontSize(18).text('Cierre de Caja - Vista Previa', { align: 'center' });
+    doc.moveDown();
+    doc
+      .fontSize(11)
+      .text(`Sesion: #${summary.session.id} | Estado: ${summary.session.status}`)
+      .text(`Apertura: ${new Date(summary.session.opened_at).toLocaleString('es-NI')}`)
+      .text(`Responsable apertura: ${summary.session.opened_by_username || summary.session.opened_by_user_id}`)
+      .moveDown();
+
+    doc.font('Helvetica-Bold').text('Resumen').font('Helvetica');
+    doc
+      .text(`Recibos emitidos: ${summary.metrics.total_receipts_issued}`)
+      .text(`Recibos anulados: ${summary.metrics.total_receipts_voided}`)
+      .text(`Total ventas: C$${summary.metrics.total_sales_amount.toFixed(2)}`)
+      .text(`Ingresos de caja: C$${summary.metrics.cash_income.toFixed(2)}`)
+      .text(`Egresos de caja: C$${summary.metrics.cash_expense.toFixed(2)}`)
+      .text(`Ingreso por membresia: C$${summary.metrics.membership_income.toFixed(2)}`)
+      .text(`Esperado al cierre: C$${summary.metrics.expected_closing_amount.toFixed(2)}`)
+      .moveDown();
+
+    const issuedPreview = summary.receipts_issued.slice(0, 20);
+    const voidedPreview = summary.receipts_voided.slice(0, 20);
+
+    doc.font('Helvetica-Bold').text('Recibos emitidos (preview)').font('Helvetica');
+    if (!issuedPreview.length) {
+      doc.text('Sin recibos emitidos en la sesion.');
+    } else {
+      issuedPreview.forEach((receipt) => {
+        doc.text(
+          `${receipt.sale_number} | ${new Date(receipt.sold_at).toLocaleString('es-NI')} | C$${Number(receipt.total).toFixed(2)}`
+        );
+      });
+    }
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').text('Recibos anulados (preview)').font('Helvetica');
+    if (!voidedPreview.length) {
+      doc.text('Sin recibos anulados en la sesion.');
+    } else {
+      voidedPreview.forEach((receipt) => {
+        doc.text(
+          `${receipt.sale_number} | ${new Date(receipt.sold_at).toLocaleString('es-NI')} | C$${Number(receipt.total).toFixed(2)}`
+        );
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i += 1) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 55;
+      doc.fontSize(8).text(`Pagina ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Rohi-POS | Usuario: ${request.user?.username || request.user?.email || 'sistema'}`, 40, bottom + 12, {
+        align: 'left'
+      });
+    }
+
+    doc.end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+cashRegisterRouter.post('/current/close', async (request, response, next) => {
+  try {
+    const userId = Number(request.user?.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw createHttpError(401, 'User session is invalid');
+    }
+
+    const closingAmount = parseNonNegativeNumber(request.body.closing_amount, 'closing_amount');
+    const note = String(request.body.notes || '').trim();
+
+    const result = await withTransaction(async (dbClient) => {
+      const session = await getOrCreateOpenCashSession(userId, dbClient);
+
+      const lockResult = await dbClient.query(
+        `SELECT id, opening_amount, notes
+         FROM cash_register_sessions
+         WHERE id = $1
+           AND status = 'open'
+         FOR UPDATE`,
+        [session.id]
+      );
+
+      if (lockResult.rowCount === 0) {
+        throw createHttpError(409, 'No open cash session available for closing');
+      }
+
+      const summary = await buildCashSessionSummary(session.id, dbClient);
+      const expectedAmount = Number(summary.metrics.expected_closing_amount || 0);
+      const differenceAmount = closingAmount - expectedAmount;
+
+      const closureSnapshot = {
+        closed_by_user_id: userId,
+        closed_at: new Date().toISOString(),
+        note,
+        metrics: summary.metrics,
+        totals: {
+          expected_amount: expectedAmount,
+          closing_amount: closingAmount,
+          difference_amount: differenceAmount
+        }
+      };
+
+      const previousNotes = String(lockResult.rows[0].notes || '').trim();
+      const mergedNotes = [
+        previousNotes,
+        note ? `Nota cierre: ${note}` : '',
+        `Cierre JSON: ${JSON.stringify(closureSnapshot)}`
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      await dbClient.query(
+        `UPDATE cash_register_sessions
+         SET
+           closed_by_user_id = $1,
+           closing_amount = $2,
+           expected_amount = $3,
+           difference_amount = $4,
+           closed_at = NOW(),
+           status = 'closed',
+           notes = $5
+         WHERE id = $6`,
+        [userId, closingAmount, expectedAmount, differenceAmount, mergedNotes, session.id]
+      );
+
+      return {
+        session_id: session.id,
+        expected_amount: expectedAmount,
+        closing_amount: closingAmount,
+        difference_amount: differenceAmount,
+        metrics: summary.metrics
+      };
+    });
+
+    response.json({
+      ok: true,
+      message: 'Cash register closed successfully',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+export { cashRegisterRouter, getOrCreateOpenCashSession };

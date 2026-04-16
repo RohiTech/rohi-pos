@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { apiGet, apiPost, apiPostForm, apiPutForm, buildQueryString } from '../lib/api';
+import { apiGet, apiPost, apiPostForm, apiPutForm, authToken, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
 
@@ -23,6 +23,7 @@ function dataURLToBlob(dataURL) {
 const PRODUCT_PAGE_SIZE = 6;
 const MOVEMENT_PAGE_SIZE = 8;
 const SALE_PAGE_SIZE = 5;
+const CASH_MOVEMENT_PAGE_SIZE = 8;
 const POS_GRID_PAGE_SIZE = 10;
 const posCategoryStorageKey = 'rohipos_pos_categories_collapsed';
 
@@ -67,6 +68,22 @@ const initialSaleForm = {
   tax: '',
   notes: '',
   items: [{ product_id: '', quantity: '1', discount: '' }]
+};
+
+const initialCashCloseForm = {
+  closing_amount: '',
+  notes: ''
+};
+
+const initialCashMovementForm = {
+  movement_type: 'income',
+  description: '',
+  amount: ''
+};
+
+const cashMovementTypeLabel = {
+  income: 'Ingreso',
+  expense: 'Egreso'
 };
 
 function normalizeText(value) {
@@ -131,6 +148,7 @@ export function PosPage() {
   const [productPage, setProductPage] = useState(1);
   const [movementPage, setMovementPage] = useState(1);
   const [salePage, setSalePage] = useState(1);
+  const [cashMovementPage, setCashMovementPage] = useState(1);
   const [posGridPage, setPosGridPage] = useState(1);
   const [productPagination, setProductPagination] = useState({
     page: 1,
@@ -147,6 +165,12 @@ export function PosPage() {
   const [salePagination, setSalePagination] = useState({
     page: 1,
     limit: SALE_PAGE_SIZE,
+    totalItems: 0,
+    totalPages: 1
+  });
+  const [cashMovementPagination, setCashMovementPagination] = useState({
+    page: 1,
+    limit: CASH_MOVEMENT_PAGE_SIZE,
     totalItems: 0,
     totalPages: 1
   });
@@ -173,11 +197,18 @@ export function PosPage() {
   const [removeProductImage, setRemoveProductImage] = useState(false);
   const [inventoryForm, setInventoryForm] = useState(initialInventoryForm);
   const [saleForm, setSaleForm] = useState(initialSaleForm);
+  const [cashCloseForm, setCashCloseForm] = useState(initialCashCloseForm);
+  const [cashMovementForm, setCashMovementForm] = useState(initialCashMovementForm);
+  const [cashMovementSearch, setCashMovementSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingInventory, setSavingInventory] = useState(false);
   const [savingSale, setSavingSale] = useState(false);
+  const [savingCashMovement, setSavingCashMovement] = useState(false);
+  const [closingCashRegister, setClosingCashRegister] = useState(false);
+  const [exportingCashClosePdf, setExportingCashClosePdf] = useState(false);
+  const [exportingCashCloseExcel, setExportingCashCloseExcel] = useState(false);
   const [productExporting, setProductExporting] = useState(false);
   const [movementExporting, setMovementExporting] = useState(false);
 
@@ -206,7 +237,19 @@ export function PosPage() {
       ),
     [saleSearch, salePage, refreshKey]
   );
-  const salesSummaryQuery = useApi(() => apiGet('/sales/summary'), [refreshKey]);
+  const cashCloseSummaryQuery = useApi(() => apiGet('/cash-register/current/summary'), [refreshKey]);
+  const cashMovementsQuery = useApi(
+    () =>
+      apiGet(
+        `/cash-movements${buildQueryString({
+          search: cashMovementSearch.trim(),
+          page: cashMovementPage,
+          limit: CASH_MOVEMENT_PAGE_SIZE
+        })}`
+      ),
+    [cashMovementSearch, cashMovementPage, refreshKey]
+  );
+  const cashMovementsSummaryQuery = useApi(() => apiGet('/cash-movements/summary'), [refreshKey]);
   const movementsQuery = useApi(
     () =>
       selectedProductId
@@ -239,7 +282,13 @@ export function PosPage() {
   const categories = categoriesQuery.data?.data || [];
   const activeClients = (clientsQuery.data?.data || []).filter((client) => client.is_active);
   const sales = salesQuery.data?.data || [];
-  const salesSummary = salesSummaryQuery.data?.data || {};
+  const cashCloseSummary = cashCloseSummaryQuery.data?.data || {};
+  const cashSession = cashCloseSummary.session || {};
+  const cashCloseMetrics = cashCloseSummary.metrics || {};
+  const receiptsIssued = cashCloseSummary.receipts_issued || [];
+  const receiptsVoided = cashCloseSummary.receipts_voided || [];
+  const cashMovements = cashMovementsQuery.data?.data || [];
+  const cashMovementsSummary = cashMovementsSummaryQuery.data?.data || {};
   const movements = movementsQuery.data?.data || [];
   const posProducts = posProductsQuery.data?.data || [];
 
@@ -254,6 +303,27 @@ export function PosPage() {
       setSalePagination(salesQuery.data.pagination);
     }
   }, [salesQuery.data]);
+
+  useEffect(() => {
+    const expectedAmount = Number(cashCloseSummary?.metrics?.expected_closing_amount || 0);
+
+    setCashCloseForm((current) => {
+      if (current.closing_amount !== '') {
+        return current;
+      }
+
+      return {
+        ...current,
+        closing_amount: String(expectedAmount)
+      };
+    });
+  }, [cashCloseSummary]);
+
+  useEffect(() => {
+    if (cashMovementsQuery.data?.pagination) {
+      setCashMovementPagination(cashMovementsQuery.data.pagination);
+    }
+  }, [cashMovementsQuery.data]);
 
   useEffect(() => {
     if (movementsQuery.data?.pagination) {
@@ -296,6 +366,10 @@ export function PosPage() {
   useEffect(() => {
     setSalePage(1);
   }, [saleSearch]);
+
+  useEffect(() => {
+    setCashMovementPage(1);
+  }, [cashMovementSearch]);
 
   useEffect(() => {
     setPosGridPage(1);
@@ -427,6 +501,117 @@ export function PosPage() {
       ...current,
       [name]: value
     }));
+  }
+
+  function handleCashMovementChange(event) {
+    const { name, value } = event.target;
+    setCashMovementForm((current) => ({
+      ...current,
+      [name]: value
+    }));
+  }
+
+  function handleCashCloseChange(event) {
+    const { name, value } = event.target;
+    setCashCloseForm((current) => ({
+      ...current,
+      [name]: value
+    }));
+  }
+
+  async function handleExportCashClosePdf() {
+    clearMessages();
+    setExportingCashClosePdf(true);
+
+    try {
+      const response = await fetch('http://localhost:3001/api/cash-register/current/summary/pdf', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${authToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('No fue posible generar el PDF del cierre de caja');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cierre_caja_sesion_${cashSession.id || 'actual'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar el PDF de cierre');
+    } finally {
+      setExportingCashClosePdf(false);
+    }
+  }
+
+  async function handleExportCashCloseExcel() {
+    clearMessages();
+    setExportingCashCloseExcel(true);
+
+    try {
+      const resumenRows = [
+        {
+          sesion_id: cashSession.id || '--',
+          estado: cashSession.status || '--',
+          apertura: cashSession.opened_at ? new Date(cashSession.opened_at).toLocaleString('es-NI') : '--',
+          recibos_emitidos: cashCloseMetrics.total_receipts_issued || 0,
+          recibos_anulados: cashCloseMetrics.total_receipts_voided || 0,
+          total_ventas: Number(cashCloseMetrics.total_sales_amount || 0),
+          ingreso_caja: Number(cashCloseMetrics.cash_income || 0),
+          egreso_caja: Number(cashCloseMetrics.cash_expense || 0),
+          ingreso_membresia: Number(cashCloseMetrics.membership_income || 0),
+          esperado_cierre: Number(cashCloseMetrics.expected_closing_amount || 0),
+          monto_cierre_digitado: Number(cashCloseForm.closing_amount || 0)
+        }
+      ];
+
+      const issuedRows = receiptsIssued.map((receipt) => ({
+        recibo: receipt.sale_number,
+        fecha: new Date(receipt.sold_at).toLocaleString('es-NI'),
+        cajero: receipt.cashier_username || '--',
+        total: Number(receipt.total || 0)
+      }));
+
+      const voidedRows = receiptsVoided.map((receipt) => ({
+        recibo: receipt.sale_number,
+        fecha: new Date(receipt.sold_at).toLocaleString('es-NI'),
+        cajero: receipt.cashier_username || '--',
+        total: Number(receipt.total || 0)
+      }));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(resumenRows), 'ResumenCierre');
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(issuedRows.length ? issuedRows : [{ info: 'Sin recibos emitidos' }]),
+        'RecibosEmitidos'
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(voidedRows.length ? voidedRows : [{ info: 'Sin recibos anulados' }]),
+        'RecibosAnulados'
+      );
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `cierre_caja_sesion_${cashSession.id || 'actual'}_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar Excel de cierre');
+    } finally {
+      setExportingCashCloseExcel(false);
+    }
   }
 
   function handleSaleItemChange(index, field, value) {
@@ -762,6 +947,47 @@ export function PosPage() {
     }
   }
 
+  async function handleCreateCashMovement(event) {
+    event.preventDefault();
+    clearMessages();
+    setSavingCashMovement(true);
+
+    try {
+      await apiPost('/cash-movements', {
+        user_id: user?.id,
+        movement_type: cashMovementForm.movement_type,
+        description: cashMovementForm.description || null,
+        amount: Number(cashMovementForm.amount)
+      });
+
+      setCashMovementForm(initialCashMovementForm);
+      triggerRefresh('Movimiento de caja registrado correctamente.');
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible registrar el movimiento de caja');
+    } finally {
+      setSavingCashMovement(false);
+    }
+  }
+
+  async function handleCloseCashRegister() {
+    clearMessages();
+    setClosingCashRegister(true);
+
+    try {
+      await apiPost('/cash-register/current/close', {
+        closing_amount: Number(cashCloseForm.closing_amount || 0),
+        notes: cashCloseForm.notes || null
+      });
+
+      setCashCloseForm(initialCashCloseForm);
+      triggerRefresh('Caja cerrada correctamente. Se ha guardado el arqueo.');
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible cerrar la caja');
+    } finally {
+      setClosingCashRegister(false);
+    }
+  }
+
   const selectedProduct = products.find((product) => String(product.id) === String(selectedProductId));
 
   const ticketItems = useMemo(
@@ -990,6 +1216,26 @@ export function PosPage() {
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'stats' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => setActiveView('stats')}
+          type="button"
+        >
+          Ventas recientes
+        </button>
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'cash-movements'
+              ? 'bg-brand-moss text-white'
+              : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => setActiveView('cash-movements')}
+          type="button"
+        >
+          Movimientos de caja
+        </button>
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
             activeView === 'products' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
           }`}
           onClick={() => setActiveView('products')}
@@ -1014,15 +1260,6 @@ export function PosPage() {
           type="button"
         >
           Cierre de caja
-        </button>
-        <button
-          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            activeView === 'stats' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
-          }`}
-          onClick={() => setActiveView('stats')}
-          type="button"
-        >
-          Historial ventas
         </button>
       </div>
 
@@ -1527,47 +1764,295 @@ export function PosPage() {
         <div className="grid gap-6">
           <DataPanel
             title="Cierre de caja"
-            subtitle="Resumen operativo del turno y del ticket actual para arqueo rapido."
+            subtitle="Vista previa de recibos y movimientos para registrar el arqueo final."
           >
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-sand/70 bg-brand-cream/30 px-4 py-3 text-sm text-brand-forest/80">
+              <p>
+                Sesion actual: <span className="font-semibold">#{cashSession.id || '--'}</span> |
+                Estado: <span className="font-semibold"> {cashSession.status === 'open' ? 'Abierta' : 'Cerrada'}</span>
+              </p>
+              <p>
+                Apertura:{' '}
+                <span className="font-semibold">
+                  {cashSession.opened_at ? new Date(cashSession.opened_at).toLocaleString('es-NI') : '--'}
+                </span>
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ventas de hoy</p>
-                <p className="mt-3 text-3xl font-bold text-brand-forest">{salesSummary.sales_today || 0}</p>
-              </article>
-              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingresos hoy</p>
-                <p className="mt-3 text-3xl font-bold text-brand-clay">
-                  {formatCurrency(salesSummary.revenue_today || 0)}
-                </p>
-              </article>
-              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Articulos ticket</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos emitidos</p>
                 <p className="mt-3 text-3xl font-bold text-brand-forest">
-                  {ticketItems.filter((item) => item.product).length}
+                  {cashCloseMetrics.total_receipts_issued || 0}
                 </p>
               </article>
               <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Total actual</p>
-                <p className="mt-3 text-3xl font-bold text-brand-clay">{formatCurrency(ticketTotal)}</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos anulados</p>
+                <p className="mt-3 text-3xl font-bold text-rose-600">
+                  {cashCloseMetrics.total_receipts_voided || 0}
+                </p>
+              </article>
+              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingresos de caja</p>
+                <p className="mt-3 text-3xl font-bold text-brand-clay">
+                  {formatCurrency(cashCloseMetrics.cash_income || 0)}
+                </p>
+              </article>
+              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Egresos de caja</p>
+                <p className="mt-3 text-3xl font-bold text-rose-600">
+                  {formatCurrency(cashCloseMetrics.cash_expense || 0)}
+                </p>
+              </article>
+              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingreso por membresia</p>
+                <p className="mt-3 text-3xl font-bold text-brand-forest">
+                  {formatCurrency(cashCloseMetrics.membership_income || 0)}
+                </p>
               </article>
             </div>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-3">
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
               <article className="rounded-2xl border border-brand-sand/70 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ventas acumuladas</p>
-                <p className="mt-3 text-3xl font-bold text-brand-forest">{salesSummary.total_sales || 0}</p>
-              </article>
-              <article className="rounded-2xl border border-brand-sand/70 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingresos acumulados</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Total ventas de la sesion</p>
                 <p className="mt-3 text-3xl font-bold text-brand-clay">
-                  {formatCurrency(salesSummary.total_revenue || 0)}
+                  {formatCurrency(cashCloseMetrics.total_sales_amount || 0)}
                 </p>
               </article>
               <article className="rounded-2xl border border-brand-sand/70 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Cambio estimado</p>
-                <p className="mt-3 text-3xl font-bold text-emerald-600">{formatCurrency(changeDue)}</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Monto esperado al cierre</p>
+                <p className="mt-3 text-3xl font-bold text-emerald-700">
+                  {formatCurrency(cashCloseMetrics.expected_closing_amount || 0)}
+                </p>
               </article>
             </div>
+
+            <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+              <section className="rounded-2xl border border-brand-sand/70 p-4">
+                <h3 className="text-lg font-semibold text-brand-forest">Registrar cierre</h3>
+                <div className="mt-4 grid gap-4">
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-brand-forest">Monto contado en caja</span>
+                    <input
+                      className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                      min="0"
+                      name="closing_amount"
+                      onChange={handleCashCloseChange}
+                      step="0.01"
+                      type="number"
+                      value={cashCloseForm.closing_amount}
+                    />
+                  </label>
+                  <label className="grid gap-2">
+                    <span className="text-sm font-semibold text-brand-forest">Notas de cierre</span>
+                    <textarea
+                      className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                      name="notes"
+                      onChange={handleCashCloseChange}
+                      placeholder="Observaciones del arqueo"
+                      value={cashCloseForm.notes}
+                    />
+                  </label>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <button
+                      className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-brand-forest disabled:opacity-60"
+                      disabled={exportingCashClosePdf}
+                      onClick={handleExportCashClosePdf}
+                      type="button"
+                    >
+                      {exportingCashClosePdf ? 'Exportando PDF...' : 'Exportar PDF'}
+                    </button>
+                    <button
+                      className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-brand-forest disabled:opacity-60"
+                      disabled={exportingCashCloseExcel}
+                      onClick={handleExportCashCloseExcel}
+                      type="button"
+                    >
+                      {exportingCashCloseExcel ? 'Exportando Excel...' : 'Exportar Excel'}
+                    </button>
+                  </div>
+                  <button
+                    className="rounded-2xl bg-brand-clay px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                    disabled={closingCashRegister || cashSession.status !== 'open'}
+                    onClick={handleCloseCashRegister}
+                    type="button"
+                  >
+                    {closingCashRegister ? 'Cerrando caja...' : 'Cerrar Caja'}
+                  </button>
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-brand-sand/70 p-4">
+                <h3 className="text-lg font-semibold text-brand-forest">Vista previa de recibos</h3>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <article className="rounded-2xl border border-brand-sand/60 p-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos emitidos</p>
+                    <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
+                      {receiptsIssued.length ? (
+                        receiptsIssued.slice(0, 20).map((receipt) => (
+                          <div key={receipt.id} className="rounded-xl border border-brand-sand/50 px-3 py-2">
+                            <p className="text-sm font-semibold text-brand-forest">{receipt.sale_number}</p>
+                            <p className="text-xs text-brand-forest/70">
+                              {new Date(receipt.sold_at).toLocaleString('es-NI')} | {formatCurrency(receipt.total)}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-brand-forest/70">Sin recibos emitidos en esta sesion.</p>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="rounded-2xl border border-brand-sand/60 p-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos anulados</p>
+                    <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
+                      {receiptsVoided.length ? (
+                        receiptsVoided.slice(0, 20).map((receipt) => (
+                          <div key={receipt.id} className="rounded-xl border border-brand-sand/50 px-3 py-2">
+                            <p className="text-sm font-semibold text-brand-forest">{receipt.sale_number}</p>
+                            <p className="text-xs text-brand-forest/70">
+                              {new Date(receipt.sold_at).toLocaleString('es-NI')} | {formatCurrency(receipt.total)}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-brand-forest/70">Sin recibos anulados en esta sesion.</p>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </DataPanel>
+        </div>
+      ) : null}
+
+      {activeView === 'cash-movements' ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
+          <DataPanel
+            title="Registro de movimientos de caja"
+            subtitle="Registra ingresos y egresos de efectivo del turno actual."
+          >
+            <form className="grid gap-4" onSubmit={handleCreateCashMovement}>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Tipo de movimiento</span>
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  name="movement_type"
+                  onChange={handleCashMovementChange}
+                  value={cashMovementForm.movement_type}
+                >
+                  <option value="income">Ingreso de efectivo</option>
+                  <option value="expense">Egreso de efectivo</option>
+                </select>
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Descripcion</span>
+                <textarea
+                  className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  name="description"
+                  onChange={handleCashMovementChange}
+                  placeholder="Ejemplo: Compra de insumos, cambio de caja, pago proveedor"
+                  value={cashMovementForm.description}
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Monto</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  min="0.01"
+                  name="amount"
+                  onChange={handleCashMovementChange}
+                  required
+                  step="0.01"
+                  type="number"
+                  value={cashMovementForm.amount}
+                />
+              </label>
+
+              <button
+                className="rounded-2xl bg-brand-moss px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                disabled={savingCashMovement}
+                type="submit"
+              >
+                {savingCashMovement ? 'Guardando...' : 'Registrar movimiento'}
+              </button>
+            </form>
+          </DataPanel>
+
+          <DataPanel
+            title="Historial de movimientos"
+            subtitle="Control de ingresos y egresos manuales registrados en caja."
+          >
+            <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-center">
+              <input
+                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                onChange={(event) => setCashMovementSearch(event.target.value)}
+                placeholder="Buscar por descripcion"
+                value={cashMovementSearch}
+              />
+              <span className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                Ingresos: {formatCurrency(cashMovementsSummary.total_income || 0)}
+              </span>
+              <span className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                Egresos: {formatCurrency(cashMovementsSummary.total_expense || 0)}
+              </span>
+              <span className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-3 py-2 text-sm font-semibold text-brand-forest">
+                Balance: {formatCurrency(cashMovementsSummary.net_balance || 0)}
+              </span>
+            </div>
+
+            {cashMovementsQuery.loading ? (
+              <p className="text-sm text-brand-forest/70">Cargando movimientos de caja...</p>
+            ) : null}
+            {!cashMovementsQuery.loading && !cashMovements.length ? (
+              <EmptyState
+                title="Sin movimientos"
+                description="No hay ingresos o egresos registrados con este filtro."
+              />
+            ) : null}
+
+            {cashMovements.length ? (
+              <div className="space-y-3">
+                {cashMovements.map((movement) => (
+                  <article key={movement.id} className="rounded-2xl border border-brand-sand/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
+                          {cashMovementTypeLabel[movement.movement_type] || movement.movement_type}
+                        </p>
+                        <h3 className="mt-1 font-semibold text-brand-forest">
+                          {movement.description || 'Sin descripcion'}
+                        </h3>
+                        <p className="mt-1 text-sm text-brand-forest/70">
+                          Registrado por: {movement.username || 'Sistema'} |{' '}
+                          {new Date(movement.created_at).toLocaleString('es-NI')}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-xl font-bold ${
+                          movement.movement_type === 'income' ? 'text-emerald-600' : 'text-rose-600'
+                        }`}
+                      >
+                        {movement.movement_type === 'income' ? '+' : '-'}
+                        {formatCurrency(movement.amount)}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            <Pagination
+              currentPage={cashMovementPagination.page}
+              itemLabel="movimientos"
+              onPageChange={setCashMovementPage}
+              pageSize={cashMovementPagination.limit}
+              totalItems={cashMovementPagination.totalItems}
+              totalPages={cashMovementPagination.totalPages}
+            />
           </DataPanel>
         </div>
       ) : null}

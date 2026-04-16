@@ -8,6 +8,7 @@ const ALLOWED_MOVEMENT_TYPES = new Set([
   'adjustment_out',
   'return'
 ]);
+const ALLOWED_CASH_MOVEMENT_TYPES = new Set(['income', 'expense']);
 
 function normalizeNullableString(value) {
   if (value === undefined || value === null) {
@@ -266,5 +267,20 @@ export function validateCreateSalePayload(payload) {
     discount: normalizeNonNegativeNumber(payload.discount, 'discount', false) ?? 0,
     notes: normalizeNullableString(payload.notes),
     items: normalizedItems
+  };
+}
+
+export function validateCreateCashMovementPayload(payload) {
+  const movementType = normalizeNullableString(payload.movement_type);
+
+  if (!movementType || !ALLOWED_CASH_MOVEMENT_TYPES.has(movementType)) {
+    throw createHttpError(400, 'movement_type is invalid');
+  }
+
+  return {
+    user_id: normalizePositiveInteger(payload.user_id, 'user_id'),
+    movement_type: movementType,
+    description: normalizeNullableString(payload.description),
+    amount: normalizePositiveNumber(payload.amount, 'amount', true)
   };
 }

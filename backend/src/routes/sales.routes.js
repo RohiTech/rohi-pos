@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../config/db.js';
+import { getOrCreateOpenCashSession } from './cash-register.routes.js';
 import {
   createHttpError,
   createPaginationMeta,
@@ -230,6 +231,12 @@ salesRouter.post('/', async (request, response, next) => {
       const timestampSuffix = Date.now().toString().slice(-6);
       const saleNumber = `SALE-${timestampSuffix}`;
       const paymentNumber = `PAY-${timestampSuffix}`;
+      let cashSessionId = payload.cash_register_session_id;
+
+      if (!cashSessionId) {
+        const openSession = await getOrCreateOpenCashSession(payload.cashier_user_id, dbClient);
+        cashSessionId = openSession.id;
+      }
 
       const saleResult = await dbClient.query(
         `INSERT INTO sales (
@@ -242,7 +249,7 @@ salesRouter.post('/', async (request, response, next) => {
           saleNumber,
           payload.client_id,
           payload.cashier_user_id,
-          payload.cash_register_session_id,
+          cashSessionId,
           subtotal,
           payload.discount,
           payload.tax,
