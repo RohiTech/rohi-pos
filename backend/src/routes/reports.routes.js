@@ -52,9 +52,36 @@ function inferMembershipStatus(startDate, endDate, persistedStatus) {
 reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
   console.log('Usuario autenticado en /product-sales/pdf:', req.user);
   try {
-    const { fechaInicio, fechaFin } = req.query;
+    const { fechaInicio, fechaFin, category_id, product_id, product_search } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const categoryId = category_id ? Number.parseInt(String(category_id), 10) : null;
+    if (category_id && (!Number.isInteger(categoryId) || categoryId <= 0)) {
+      return res.status(400).json({ message: 'category_id debe ser un entero positivo' });
+    }
+
+    const productId = product_id ? Number.parseInt(String(product_id), 10) : null;
+    if (product_id && (!Number.isInteger(productId) || productId <= 0)) {
+      return res.status(400).json({ message: 'product_id debe ser un entero positivo' });
+    }
+
+    const productSearch = String(product_search || '').trim();
+    const conditions = ["s.sold_at::date BETWEEN $1 AND $2", "s.status = 'completed'"];
+    const sqlParams = [fechaInicio, fechaFin];
+
+    if (categoryId) {
+      sqlParams.push(categoryId);
+      conditions.push(`p.category_id = $${sqlParams.length}`);
+    }
+
+    if (productId) {
+      sqlParams.push(productId);
+      conditions.push(`p.id = $${sqlParams.length}`);
+    } else if (productSearch) {
+      sqlParams.push(`%${productSearch}%`);
+      conditions.push(`(p.name ILIKE $${sqlParams.length} OR COALESCE(p.sku, '') ILIKE $${sqlParams.length})`);
     }
 
     // Query para ventas por producto
@@ -63,10 +90,10 @@ reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
        FROM sale_items si
        JOIN products p ON si.product_id = p.id
        JOIN sales s ON si.sale_id = s.id
-       WHERE s.sold_at::date BETWEEN $1 AND $2 AND s.status = 'completed'
+       WHERE ${conditions.join(' AND ')}
        GROUP BY p.name
        ORDER BY total_vendido DESC`
-      , [fechaInicio, fechaFin]
+      , sqlParams
     );
 
     const usuario = req.user?.username || req.user?.email || 'Desconocido';
@@ -80,6 +107,16 @@ reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
     doc.fontSize(18).text('Reporte de Ventas por Producto', { align: 'center' });
     doc.moveDown();
     doc.fontSize(12).text(`Desde: ${fechaInicio}  Hasta: ${fechaFin}`, 20);
+    const appliedFilters = [];
+    if (categoryId) {
+      appliedFilters.push(`Categoria ID: ${categoryId}`);
+    }
+    if (productId) {
+      appliedFilters.push(`Producto ID: ${productId}`);
+    } else if (productSearch) {
+      appliedFilters.push(`Busqueda de producto: ${productSearch}`);
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ') || 'Sin filtros adicionales'}`, 20);
     doc.moveDown();
 
     if (rows.length === 0) {
