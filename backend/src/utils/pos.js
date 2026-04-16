@@ -284,3 +284,29 @@ export function validateCreateCashMovementPayload(payload) {
     amount: normalizePositiveNumber(payload.amount, 'amount', true)
   };
 }
+
+export function validateUpdateSaleReceiptPayload(payload) {
+  const updates = {};
+
+  if ('client_id' in payload) {
+    updates.client_id = normalizePositiveInteger(payload.client_id, 'client_id');
+  }
+
+  if ('payment_method' in payload) {
+    const paymentMethod = normalizeNullableString(payload.payment_method);
+    if (!paymentMethod || !ALLOWED_PAYMENT_METHODS.has(paymentMethod)) {
+      throw createHttpError(400, 'payment_method is invalid');
+    }
+    updates.payment_method = paymentMethod;
+  }
+
+  if ('notes' in payload) {
+    updates.notes = normalizeNullableString(payload.notes);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw createHttpError(400, 'At least one field is required to update the receipt');
+  }
+
+  return updates;
+}

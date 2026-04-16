@@ -7,7 +7,72 @@ import {
   parsePaginationParams,
   parsePositiveInteger
 } from '../utils/http.js';
-import { validateCreateSalePayload } from '../utils/pos.js';
+import { validateCreateSalePayload, validateUpdateSaleReceiptPayload } from '../utils/pos.js';
+
+const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'card', 'transfer', 'mobile', 'other']);
+
+function parseNullablePositiveInteger(value, fieldName) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = parsePositiveInteger(value);
+  if (!parsed) {
+    throw createHttpError(400, `${fieldName} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+function parseNonNegativeNumber(value, fieldName) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    throw createHttpError(400, `${fieldName} must be a non-negative number`);
+  }
+
+  return parsed;
+}
+
+function parseReceiptUpdatePayload(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  if (items.length === 0) {
+    throw createHttpError(400, 'items must contain at least one product');
+  }
+
+  const normalizedItems = items.map((item, index) => {
+    const productId = parseNullablePositiveInteger(item.product_id, `items[${index}].product_id`);
+    if (!productId) {
+      throw createHttpError(400, `items[${index}].product_id is required`);
+    }
+
+    const quantity = Number(item.quantity);
+    if (Number.isNaN(quantity) || quantity <= 0) {
+      throw createHttpError(400, `items[${index}].quantity must be a positive number`);
+    }
+
+    const discount = parseNonNegativeNumber(item.discount ?? 0, `items[${index}].discount`);
+
+    return {
+      product_id: productId,
+      quantity,
+      discount
+    };
+  });
+
+  const paymentMethod = String(payload.payment_method || '').trim();
+  if (!paymentMethod || !ALLOWED_PAYMENT_METHODS.has(paymentMethod)) {
+    throw createHttpError(400, 'payment_method is invalid');
+  }
+
+  return {
+    client_id: parseNullablePositiveInteger(payload.client_id, 'client_id'),
+    payment_method: paymentMethod,
+    discount: parseNonNegativeNumber(payload.discount ?? 0, 'discount'),
+    tax: parseNonNegativeNumber(payload.tax ?? 0, 'tax'),
+    notes: payload.notes == null ? null : String(payload.notes).trim() || null,
+    items: normalizedItems
+  };
+}
 
 const salesRouter = Router();
 
@@ -325,6 +390,336 @@ salesRouter.post('/', async (request, response, next) => {
     response.status(201).json({
       ok: true,
       message: 'Sale created successfully',
+      data: sale
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+salesRouter.put('/:id', async (request, response, next) => {
+  try {
+    const saleId = parsePositiveInteger(request.params.id);
+    if (!saleId) {
+      throw createHttpError(400, 'Sale id must be a positive integer');
+    }
+
+    const updates = validateUpdateSaleReceiptPayload(request.body);
+
+    if ('client_id' in updates) {
+      await ensureClientExists(updates.client_id);
+    }
+
+    await withTransaction(async (dbClient) => {
+      const lockResult = await dbClient.query(
+        `SELECT id FROM sales WHERE id = $1 FOR UPDATE`,
+        [saleId]
+      );
+
+      if (lockResult.rowCount === 0) {
+        throw createHttpError(404, 'Sale not found');
+      }
+
+      const saleSetClauses = [];
+      const saleValues = [];
+
+      if ('client_id' in updates) {
+        saleValues.push(updates.client_id);
+        saleSetClauses.push(`client_id = $${saleValues.length}`);
+      }
+
+      if ('notes' in updates) {
+        saleValues.push(updates.notes);
+        saleSetClauses.push(`notes = $${saleValues.length}`);
+      }
+
+      if (saleSetClauses.length > 0) {
+        await dbClient.query(
+          `UPDATE sales
+           SET ${saleSetClauses.join(', ')}
+           WHERE id = $${saleValues.length + 1}`,
+          [...saleValues, saleId]
+        );
+      }
+
+      const paymentSetClauses = [];
+      const paymentValues = [];
+
+      if ('client_id' in updates) {
+        paymentValues.push(updates.client_id);
+        paymentSetClauses.push(`client_id = $${paymentValues.length}`);
+      }
+
+      if ('payment_method' in updates) {
+        paymentValues.push(updates.payment_method);
+        paymentSetClauses.push(`payment_method = $${paymentValues.length}`);
+      }
+
+      if (paymentSetClauses.length > 0) {
+        await dbClient.query(
+          `UPDATE payments
+           SET ${paymentSetClauses.join(', ')}
+           WHERE sale_id = $${paymentValues.length + 1}`,
+          [...paymentValues, saleId]
+        );
+      }
+    });
+
+    const sale = await getSaleById(saleId);
+
+    response.json({
+      ok: true,
+      message: 'Receipt updated successfully',
+      data: sale
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+salesRouter.put('/:id/receipt', async (request, response, next) => {
+  try {
+    const saleId = parsePositiveInteger(request.params.id);
+    if (!saleId) {
+      throw createHttpError(400, 'Sale id must be a positive integer');
+    }
+
+    const payload = parseReceiptUpdatePayload(request.body);
+    await ensureClientExists(payload.client_id);
+
+    await withTransaction(async (dbClient) => {
+      const saleResult = await dbClient.query(
+        `SELECT id, sale_number, status, cashier_user_id
+         FROM sales
+         WHERE id = $1
+         FOR UPDATE`,
+        [saleId]
+      );
+
+      if (saleResult.rowCount === 0) {
+        throw createHttpError(404, 'Sale not found');
+      }
+
+      const sale = saleResult.rows[0];
+      if (sale.status === 'cancelled') {
+        throw createHttpError(409, 'Cannot edit a cancelled receipt');
+      }
+
+      const oldItemsResult = await dbClient.query(
+        `SELECT product_id, quantity
+         FROM sale_items
+         WHERE sale_id = $1
+           AND item_type = 'product'
+           AND product_id IS NOT NULL`,
+        [saleId]
+      );
+
+      const oldByProduct = new Map();
+      oldItemsResult.rows.forEach((row) => {
+        const key = Number(row.product_id);
+        oldByProduct.set(key, (oldByProduct.get(key) || 0) + Number(row.quantity || 0));
+      });
+
+      const newByProduct = new Map();
+      payload.items.forEach((item) => {
+        newByProduct.set(
+          item.product_id,
+          (newByProduct.get(item.product_id) || 0) + Number(item.quantity || 0)
+        );
+      });
+
+      const productIds = new Set([...oldByProduct.keys(), ...newByProduct.keys()]);
+      const productSnapshots = new Map();
+
+      for (const productId of productIds) {
+        const productResult = await dbClient.query(
+          `SELECT id, name, sale_price, stock_quantity
+           FROM products
+           WHERE id = $1
+           FOR UPDATE`,
+          [productId]
+        );
+
+        if (productResult.rowCount === 0) {
+          throw createHttpError(404, `Product ${productId} not found`);
+        }
+
+        productSnapshots.set(productId, productResult.rows[0]);
+      }
+
+      const preparedItems = payload.items.map((item) => {
+        const product = productSnapshots.get(item.product_id);
+        const lineTotal = Number(product.sale_price) * Number(item.quantity) - Number(item.discount);
+
+        if (lineTotal < 0) {
+          throw createHttpError(400, `Invalid discount for product ${product.name}`);
+        }
+
+        return {
+          ...item,
+          name: product.name,
+          unit_price: Number(product.sale_price),
+          line_total: lineTotal
+        };
+      });
+
+      for (const [productId, product] of productSnapshots) {
+        const oldQty = Number(oldByProduct.get(productId) || 0);
+        const newQty = Number(newByProduct.get(productId) || 0);
+        const reconciledStock = Number(product.stock_quantity) + oldQty - newQty;
+
+        if (reconciledStock < 0) {
+          throw createHttpError(400, `Insufficient stock to update receipt for product ${product.name}`);
+        }
+
+        await dbClient.query('UPDATE products SET stock_quantity = $1 WHERE id = $2', [
+          reconciledStock,
+          productId
+        ]);
+      }
+
+      await dbClient.query('DELETE FROM sale_items WHERE sale_id = $1', [saleId]);
+
+      for (const item of preparedItems) {
+        await dbClient.query(
+          `INSERT INTO sale_items (
+             sale_id, product_id, item_type, description, quantity, unit_price, discount, line_total
+           )
+           VALUES ($1, $2, 'product', $3, $4, $5, $6, $7)`,
+          [
+            saleId,
+            item.product_id,
+            item.name,
+            item.quantity,
+            item.unit_price,
+            item.discount,
+            item.line_total
+          ]
+        );
+      }
+
+      const subtotal = preparedItems.reduce((sum, item) => sum + Number(item.line_total), 0);
+      const total = subtotal - Number(payload.discount) + Number(payload.tax);
+
+      if (total <= 0) {
+        throw createHttpError(400, 'Sale total must be greater than zero');
+      }
+
+      await dbClient.query(
+        `UPDATE sales
+         SET client_id = $1, subtotal = $2, discount = $3, tax = $4, total = $5, notes = $6
+         WHERE id = $7`,
+        [
+          payload.client_id,
+          subtotal,
+          payload.discount,
+          payload.tax,
+          total,
+          payload.notes,
+          saleId
+        ]
+      );
+
+      await dbClient.query(
+        `UPDATE payments
+         SET client_id = $1, payment_method = $2, amount = $3, notes = $4
+         WHERE sale_id = $5`,
+        [payload.client_id, payload.payment_method, total, payload.notes, saleId]
+      );
+    });
+
+    const sale = await getSaleById(saleId);
+    response.json({
+      ok: true,
+      message: 'Receipt updated successfully',
+      data: sale
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+salesRouter.post('/:id/cancel', async (request, response, next) => {
+  try {
+    const saleId = parsePositiveInteger(request.params.id);
+    if (!saleId) {
+      throw createHttpError(400, 'Sale id must be a positive integer');
+    }
+
+    const reason = String(request.body?.reason || '').trim();
+
+    await withTransaction(async (dbClient) => {
+      const saleResult = await dbClient.query(
+        `SELECT id, status, notes
+         FROM sales
+         WHERE id = $1
+         FOR UPDATE`,
+        [saleId]
+      );
+
+      if (saleResult.rowCount === 0) {
+        throw createHttpError(404, 'Sale not found');
+      }
+
+      const sale = saleResult.rows[0];
+      if (sale.status === 'cancelled') {
+        throw createHttpError(409, 'Receipt is already cancelled');
+      }
+
+      const itemsResult = await dbClient.query(
+        `SELECT product_id, quantity
+         FROM sale_items
+         WHERE sale_id = $1
+           AND item_type = 'product'
+           AND product_id IS NOT NULL`,
+        [saleId]
+      );
+
+      for (const row of itemsResult.rows) {
+        const productResult = await dbClient.query(
+          `SELECT id, stock_quantity
+           FROM products
+           WHERE id = $1
+           FOR UPDATE`,
+          [row.product_id]
+        );
+
+        if (productResult.rowCount === 0) {
+          continue;
+        }
+
+        await dbClient.query('UPDATE products SET stock_quantity = $1 WHERE id = $2', [
+          Number(productResult.rows[0].stock_quantity || 0) + Number(row.quantity || 0),
+          row.product_id
+        ]);
+      }
+
+      const cancellationNote = [
+        String(sale.notes || '').trim(),
+        `[ANULADO ${new Date().toISOString()}] ${reason || 'Sin motivo especifico'}`
+      ]
+        .filter(Boolean)
+        .join(' | ');
+
+      await dbClient.query(
+        `UPDATE sales
+         SET status = 'cancelled', notes = $1
+         WHERE id = $2`,
+        [cancellationNote, saleId]
+      );
+
+      await dbClient.query(
+        `UPDATE payments
+         SET notes = COALESCE(notes, '') || $1
+         WHERE sale_id = $2`,
+        [` | [ANULADO ${new Date().toISOString()}]`, saleId]
+      );
+    });
+
+    const sale = await getSaleById(saleId);
+    response.json({
+      ok: true,
+      message: 'Receipt cancelled successfully',
       data: sale
     });
   } catch (error) {

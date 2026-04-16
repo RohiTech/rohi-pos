@@ -4,7 +4,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { apiGet, apiPost, apiPostForm, apiPutForm, authToken, buildQueryString } from '../lib/api';
+import { apiGet, apiPost, apiPostForm, apiPut, apiPutForm, authToken, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
 
@@ -197,6 +197,8 @@ export function PosPage() {
   const [removeProductImage, setRemoveProductImage] = useState(false);
   const [inventoryForm, setInventoryForm] = useState(initialInventoryForm);
   const [saleForm, setSaleForm] = useState(initialSaleForm);
+  const [editingReceiptId, setEditingReceiptId] = useState(null);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
   const [cashCloseForm, setCashCloseForm] = useState(initialCashCloseForm);
   const [cashMovementForm, setCashMovementForm] = useState(initialCashMovementForm);
   const [cashMovementSearch, setCashMovementSearch] = useState('');
@@ -511,6 +513,82 @@ export function PosPage() {
     }));
   }
 
+  async function loadReceiptToTicket(saleId) {
+    clearMessages();
+    setLoadingReceipt(true);
+
+    try {
+      const response = await apiGet(`/sales/${saleId}`);
+      const sale = response.data;
+      const productItems = (sale.items || []).filter(
+        (item) => item.item_type === 'product' && item.product_id
+      );
+
+      if (!productItems.length) {
+        throw new Error('El recibo no tiene lineas de producto editables');
+      }
+
+      setSaleForm({
+        client_id: sale.client_id ? String(sale.client_id) : '',
+        payment_method: sale.payments?.[0]?.payment_method || 'cash',
+        discount: String(Number(sale.discount || 0)),
+        tax: String(Number(sale.tax || 0)),
+        notes: sale.notes || '',
+        items: productItems.map((item) => ({
+          product_id: String(item.product_id),
+          quantity: String(Number(item.quantity || 0)),
+          discount: String(Number(item.discount || 0))
+        }))
+      });
+
+      if (sale.client_id) {
+        setClientSearch(
+          `${sale.client_code || ''} - ${sale.client_first_name || ''} ${sale.client_last_name || ''}`.trim()
+        );
+      } else {
+        setClientSearch('');
+      }
+
+      setEditingReceiptId(sale.id);
+      setSelectedLineIndex(0);
+      setKeypadTarget('amount-tendered');
+      setAmountTendered(String(Number(sale.total || 0)));
+      setActiveView('sales');
+      notifySuccess(`Recibo ${sale.sale_number} cargado para editar o anular.`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible cargar el recibo');
+    } finally {
+      setLoadingReceipt(false);
+    }
+  }
+
+  async function handleCancelReceipt() {
+    if (!editingReceiptId) {
+      return;
+    }
+
+    const shouldCancel = window.confirm('¿Deseas anular este recibo? Esta accion revertira inventario.');
+    if (!shouldCancel) {
+      return;
+    }
+
+    clearMessages();
+    setSavingSale(true);
+
+    try {
+      await apiPost(`/sales/${editingReceiptId}/cancel`, {
+        reason: saleForm.notes || null
+      });
+
+      clearTicket();
+      triggerRefresh('Recibo anulado correctamente.');
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible anular el recibo');
+    } finally {
+      setSavingSale(false);
+    }
+  }
+
   function handleCashCloseChange(event) {
     const { name, value } = event.target;
     setCashCloseForm((current) => ({
@@ -643,6 +721,7 @@ export function PosPage() {
 
   function clearTicket() {
     setSaleForm(initialSaleForm);
+    setEditingReceiptId(null);
     setClientSearch('');
     setSelectedLineIndex(0);
     setKeypadTarget('amount-tendered');
@@ -924,7 +1003,7 @@ export function PosPage() {
     try {
       const validItems = saleForm.items.filter((item) => item.product_id && Number(item.quantity) > 0);
 
-      await apiPost('/sales', {
+      const payload = {
         client_id: saleForm.client_id ? Number(saleForm.client_id) : null,
         cashier_user_id: user.id,
         payment_method: saleForm.payment_method,
@@ -936,12 +1015,23 @@ export function PosPage() {
           quantity: Number(item.quantity),
           discount: item.discount === '' ? 0 : Number(item.discount)
         }))
-      });
+      };
+
+      if (editingReceiptId) {
+        await apiPut(`/sales/${editingReceiptId}/receipt`, payload);
+      } else {
+        await apiPost('/sales', payload);
+      }
 
       clearTicket();
-      triggerRefresh('Venta registrada correctamente.');
+      triggerRefresh(
+        editingReceiptId ? 'Recibo actualizado correctamente.' : 'Venta registrada correctamente.'
+      );
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible registrar la venta');
+      setError(
+        requestError.message ||
+          (editingReceiptId ? 'No fue posible actualizar el recibo' : 'No fue posible registrar la venta')
+      );
     } finally {
       setSavingSale(false);
     }
@@ -1638,13 +1728,42 @@ export function PosPage() {
 
             <DataPanel title="Datos de venta" subtitle="Cliente, forma de pago y observaciones del ticket.">
               <form className="grid gap-4" onSubmit={handleCreateSale}>
+                {editingReceiptId ? (
+                  <p className="rounded-2xl border border-brand-sand/70 bg-brand-cream/40 px-4 py-3 text-sm font-semibold text-brand-forest">
+                    Editando recibo ID #{editingReceiptId}
+                  </p>
+                ) : null}
                 <button
                   className="rounded-2xl bg-brand-moss px-4 py-4 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
                   disabled={savingSale || productOptionsQuery.loading || ticketTotal <= 0}
                   type="submit"
                 >
-                  {savingSale ? 'Guardando...' : 'Registrar venta'}
+                  {savingSale
+                    ? 'Guardando...'
+                    : editingReceiptId
+                      ? 'Guardar cambios del recibo'
+                      : 'Registrar venta'}
                 </button>
+
+                {editingReceiptId ? (
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <button
+                      className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-rose-700 disabled:opacity-60"
+                      disabled={savingSale}
+                      onClick={handleCancelReceipt}
+                      type="button"
+                    >
+                      Anular recibo
+                    </button>
+                    <button
+                      className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-brand-forest"
+                      onClick={clearTicket}
+                      type="button"
+                    >
+                      Salir de edicion
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 md:grid-cols-3">
                   <button
@@ -2070,6 +2189,7 @@ export function PosPage() {
             </div>
 
             {salesQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando ventas...</p> : null}
+            {loadingReceipt ? <p className="text-sm text-brand-forest/70">Cargando recibo seleccionado...</p> : null}
             {!salesQuery.loading && !sales.length ? (
               <EmptyState title="Sin ventas" description="No hay ventas que coincidan con la busqueda actual." />
             ) : null}
@@ -2090,7 +2210,16 @@ export function PosPage() {
                           Cajero: {sale.cashier_username} | {formatDate(sale.sold_at)}
                         </p>
                       </div>
-                      <span className="text-xl font-bold text-brand-clay">{formatCurrency(sale.total)}</span>
+                      <div className="grid gap-2 justify-items-end">
+                        <span className="text-xl font-bold text-brand-clay">{formatCurrency(sale.total)}</span>
+                        <button
+                          className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest"
+                          onClick={() => loadReceiptToTicket(sale.id)}
+                          type="button"
+                        >
+                          Editar recibo
+                        </button>
+                      </div>
                     </div>
                   </article>
                 ))}
