@@ -32,33 +32,22 @@ const reportModules = [
   }
 ];
 
-function downloadDailySalesPdf() {
-  fetch('http://localhost:3001/api/reports/daily-sales/pdf', {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${authToken}`
-    }
-  })
-    .then(response => {
-      if (!response.ok) throw new Error('No se pudo descargar el PDF');
-      return response.blob();
-    })
-    .then(blob => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'ventas_diarias.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    })
-    .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+function getTodayDateString() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function ReportsPage() {
+  const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
   const [openCashSummaryModal, setOpenCashSummaryModal] = useState(false);
+  const [dailyParams, setDailyParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    cashierUserId: '',
+    saleStatus: '',
+    cashSessionId: ''
+  });
+  const [cashiers, setCashiers] = useState([]);
   const [params, setParams] = useState({
     fechaInicio: '',
     fechaFin: '',
@@ -148,6 +137,37 @@ export function ReportsPage() {
   useEffect(() => {
     let isMounted = true;
 
+    if (!openDailySalesModal) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    Promise.all([
+      apiGet('/users?active=true&limit=100'),
+      apiGet('/reports/cash-sessions/options')
+    ])
+      .then(([usersResponse, sessionsResponse]) => {
+        if (isMounted) {
+          setCashiers(usersResponse.data || []);
+          setCashSessions(sessionsResponse.data || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setCashiers([]);
+          setCashSessions([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [openDailySalesModal]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     if (!openCashSummaryModal) {
       return () => {
         isMounted = false;
@@ -171,6 +191,8 @@ export function ReportsPage() {
     };
   }, [openCashSummaryModal]);
 
+  const handleOpenDailySales = () => setOpenDailySalesModal(true);
+  const handleCloseDailySales = () => setOpenDailySalesModal(false);
   const handleOpenProductSales = () => setOpenProductSalesModal(true);
   const handleCloseProductSales = () => {
     setOpenProductSalesModal(false);
@@ -198,6 +220,11 @@ export function ReportsPage() {
   const handleCashParamsChange = (e) => {
     const { name, value } = e.target;
     setCashParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleDailyParamsChange = (e) => {
+    const { name, value } = e.target;
+    setDailyParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -240,6 +267,41 @@ export function ReportsPage() {
       })
       .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
     setOpenProductSalesModal(false);
+  };
+
+  const handleDailySalesReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: dailyParams.fechaInicio,
+      fechaFin: dailyParams.fechaFin,
+      cashier_user_id: dailyParams.cashierUserId,
+      status: dailyParams.saleStatus,
+      cash_register_session_id: dailyParams.cashSessionId
+    });
+
+    fetch(`http://localhost:3001/api/reports/daily-sales/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ventas_diarias.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenDailySalesModal(false);
   };
 
   const handleCashSummaryReport = async (e) => {
@@ -293,7 +355,7 @@ export function ReportsPage() {
                   {report === 'Ventas diarias' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
-                      onClick={downloadDailySalesPdf}
+                      onClick={handleOpenDailySales}
                     >
                       {report} (PDF)
                     </button>
@@ -320,6 +382,89 @@ export function ReportsPage() {
           </DataPanel>
         ))}
       </div>
+
+      <SimpleModal open={openDailySalesModal} onClose={handleCloseDailySales}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas diarias</h2>
+        <form onSubmit={handleDailySalesReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={dailyParams.fechaInicio}
+              onChange={handleDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={dailyParams.fechaFin}
+              onChange={handleDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Cajero (opcional)</span>
+            <select
+              name="cashierUserId"
+              value={dailyParams.cashierUserId}
+              onChange={handleDailyParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              {cashiers.map((cashier) => (
+                <option key={cashier.id} value={cashier.id}>
+                  {cashier.username}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="saleStatus"
+              value={dailyParams.saleStatus}
+              onChange={handleDailyParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Completadas (por defecto)</option>
+              <option value="completed">Completadas</option>
+              <option value="pending">Pendientes</option>
+              <option value="cancelled">Canceladas</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Sesión de caja (opcional)</span>
+            <select
+              name="cashSessionId"
+              value={dailyParams.cashSessionId}
+              onChange={handleDailyParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas</option>
+              {cashSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  Sesión #{session.id} - {session.status === 'open' ? 'Abierta' : 'Cerrada'} -{' '}
+                  {new Date(session.opened_at).toLocaleDateString('es-NI')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseDailySales} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
 
       <SimpleModal open={openProductSalesModal} onClose={handleCloseProductSales}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas por producto</h2>

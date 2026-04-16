@@ -160,9 +160,76 @@ reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
 
 reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
   try {
-    // Obtener ventas del día
+    const {
+      fechaInicio,
+      fechaFin,
+      cashier_user_id: cashierUserIdRaw,
+      status: saleStatusRaw,
+      cash_register_session_id: cashSessionIdRaw
+    } = req.query;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const startDate = String(fechaInicio || today);
+    const endDate = String(fechaFin || startDate);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const allowedStatuses = new Set(['pending', 'completed', 'cancelled']);
+    const saleStatus = String(saleStatusRaw || '').trim();
+    if (saleStatus && !allowedStatuses.has(saleStatus)) {
+      return res.status(400).json({ message: 'status debe ser pending, completed o cancelled' });
+    }
+
+    const cashierUserId = cashierUserIdRaw
+      ? Number.parseInt(String(cashierUserIdRaw), 10)
+      : null;
+    if (cashierUserIdRaw && (!Number.isInteger(cashierUserId) || cashierUserId <= 0)) {
+      return res.status(400).json({ message: 'cashier_user_id debe ser un entero positivo' });
+    }
+
+    const cashSessionId = cashSessionIdRaw
+      ? Number.parseInt(String(cashSessionIdRaw), 10)
+      : null;
+    if (cashSessionIdRaw && (!Number.isInteger(cashSessionId) || cashSessionId <= 0)) {
+      return res.status(400).json({ message: 'cash_register_session_id debe ser un entero positivo' });
+    }
+
+    const conditions = ['s.sold_at::date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (saleStatus) {
+      sqlParams.push(saleStatus);
+      conditions.push(`s.status = $${sqlParams.length}`);
+    } else {
+      conditions.push("s.status = 'completed'");
+    }
+
+    if (cashierUserId) {
+      sqlParams.push(cashierUserId);
+      conditions.push(`s.cashier_user_id = $${sqlParams.length}`);
+    }
+
+    if (cashSessionId) {
+      sqlParams.push(cashSessionId);
+      conditions.push(`s.cash_register_session_id = $${sqlParams.length}`);
+    }
+
     const { rows } = await query(
-      `SELECT sale_number, total, sold_at, cashier_user_id FROM sales WHERE sold_at::date = CURRENT_DATE AND status = 'completed' ORDER BY sold_at DESC`
+      `SELECT
+         s.sale_number,
+         s.total,
+         s.sold_at,
+         s.cashier_user_id,
+         u.username AS cashier_username,
+         s.status,
+         s.cash_register_session_id
+       FROM sales s
+       LEFT JOIN users u ON u.id = s.cashier_user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY s.sold_at DESC`,
+      sqlParams
     );
 
     // Datos de usuario autenticado
@@ -181,7 +248,20 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     // Encabezado
     doc.fontSize(18).text('Reporte de Ventas Diarias', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(12).text(`Fecha: ${new Date().toLocaleDateString()}`, 20);
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (saleStatus) {
+      appliedFilters.push(`Estado: ${saleStatus}`);
+    } else {
+      appliedFilters.push('Estado: completed');
+    }
+    if (cashierUserId) {
+      appliedFilters.push(`Cajero ID: ${cashierUserId}`);
+    }
+    if (cashSessionId) {
+      appliedFilters.push(`Sesion caja: ${cashSessionId}`);
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ')}`, 20);
     doc.moveDown();
 
     if (rows.length === 0) {
@@ -201,7 +281,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
         doc.text(row.sale_number, 20, y, { width: 100, align: 'left' });
         doc.text(`C$${Number(row.total).toFixed(2)}`, 120, y, { width: 100, align: 'right' });
         doc.text(new Date(row.sold_at).toLocaleTimeString(), 230, y, { width: 100, align: 'center' });
-        doc.text(String(row.cashier_user_id), 330, y, { width: 100, align: 'center' });
+        doc.text(row.cashier_username || String(row.cashier_user_id), 330, y, { width: 100, align: 'center' });
         doc.moveDown(0.5);
       });
       doc.moveDown(1);
