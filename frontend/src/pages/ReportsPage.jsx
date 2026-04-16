@@ -40,10 +40,18 @@ export function ReportsPage() {
   const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
   const [openCashSummaryModal, setOpenCashSummaryModal] = useState(false);
+  const [openSellerSalesModal, setOpenSellerSalesModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: getTodayDateString(),
     fechaFin: getTodayDateString(),
     cashierUserId: '',
+    saleStatus: '',
+    cashSessionId: ''
+  });
+  const [sellerParams, setSellerParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    sellerUserId: '',
     saleStatus: '',
     cashSessionId: ''
   });
@@ -137,7 +145,7 @@ export function ReportsPage() {
   useEffect(() => {
     let isMounted = true;
 
-    if (!openDailySalesModal) {
+    if (!(openDailySalesModal || openSellerSalesModal)) {
       return () => {
         isMounted = false;
       };
@@ -163,7 +171,7 @@ export function ReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [openDailySalesModal]);
+  }, [openDailySalesModal, openSellerSalesModal]);
 
   useEffect(() => {
     let isMounted = true;
@@ -201,6 +209,8 @@ export function ReportsPage() {
   };
   const handleOpenCashSummary = () => setOpenCashSummaryModal(true);
   const handleCloseCashSummary = () => setOpenCashSummaryModal(false);
+  const handleOpenSellerSales = () => setOpenSellerSalesModal(true);
+  const handleCloseSellerSales = () => setOpenSellerSalesModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -225,6 +235,11 @@ export function ReportsPage() {
   const handleDailyParamsChange = (e) => {
     const { name, value } = e.target;
     setDailyParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSellerParamsChange = (e) => {
+    const { name, value } = e.target;
+    setSellerParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -338,6 +353,41 @@ export function ReportsPage() {
     setOpenCashSummaryModal(false);
   };
 
+  const handleSellerSalesReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: sellerParams.fechaInicio,
+      fechaFin: sellerParams.fechaFin,
+      seller_user_id: sellerParams.sellerUserId,
+      status: sellerParams.saleStatus,
+      cash_register_session_id: sellerParams.cashSessionId
+    });
+
+    fetch(`http://localhost:3001/api/reports/seller-sales/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ventas_por_vendedor.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenSellerSalesModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -370,6 +420,13 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenCashSummary}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ventas por vendedor' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenSellerSales}
                     >
                       {report}
                     </button>
@@ -592,6 +649,93 @@ export function ReportsPage() {
             <button
               type="button"
               onClick={handleCloseCashSummary}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openSellerSalesModal} onClose={handleCloseSellerSales}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas por vendedor</h2>
+        <form onSubmit={handleSellerSalesReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={sellerParams.fechaInicio}
+              onChange={handleSellerParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={sellerParams.fechaFin}
+              onChange={handleSellerParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Vendedor (opcional)</span>
+            <select
+              name="sellerUserId"
+              value={sellerParams.sellerUserId}
+              onChange={handleSellerParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              {cashiers.map((cashier) => (
+                <option key={cashier.id} value={cashier.id}>
+                  {cashier.username}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="saleStatus"
+              value={sellerParams.saleStatus}
+              onChange={handleSellerParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Completadas (por defecto)</option>
+              <option value="completed">Completadas</option>
+              <option value="pending">Pendientes</option>
+              <option value="cancelled">Canceladas</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Sesión de caja (opcional)</span>
+            <select
+              name="cashSessionId"
+              value={sellerParams.cashSessionId}
+              onChange={handleSellerParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas</option>
+              {cashSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  Sesión #{session.id} - {session.status === 'open' ? 'Abierta' : 'Cerrada'} -{' '}
+                  {new Date(session.opened_at).toLocaleDateString('es-NI')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseSellerSales}
               className="px-3 py-1 rounded bg-gray-200"
             >
               Cancelar

@@ -315,6 +315,166 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      seller_user_id: sellerUserIdRaw,
+      status: saleStatusRaw,
+      cash_register_session_id: cashSessionIdRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const allowedStatuses = new Set(['pending', 'completed', 'cancelled']);
+    const saleStatus = String(saleStatusRaw || '').trim();
+    if (saleStatus && !allowedStatuses.has(saleStatus)) {
+      return res.status(400).json({ message: 'status debe ser pending, completed o cancelled' });
+    }
+
+    const sellerUserId = sellerUserIdRaw
+      ? Number.parseInt(String(sellerUserIdRaw), 10)
+      : null;
+    if (sellerUserIdRaw && (!Number.isInteger(sellerUserId) || sellerUserId <= 0)) {
+      return res.status(400).json({ message: 'seller_user_id debe ser un entero positivo' });
+    }
+
+    const cashSessionId = cashSessionIdRaw
+      ? Number.parseInt(String(cashSessionIdRaw), 10)
+      : null;
+    if (cashSessionIdRaw && (!Number.isInteger(cashSessionId) || cashSessionId <= 0)) {
+      return res.status(400).json({ message: 'cash_register_session_id debe ser un entero positivo' });
+    }
+
+    const conditions = ['s.sold_at::date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (saleStatus) {
+      sqlParams.push(saleStatus);
+      conditions.push(`s.status = $${sqlParams.length}`);
+    } else {
+      conditions.push("s.status = 'completed'");
+    }
+
+    if (sellerUserId) {
+      sqlParams.push(sellerUserId);
+      conditions.push(`s.cashier_user_id = $${sqlParams.length}`);
+    }
+
+    if (cashSessionId) {
+      sqlParams.push(cashSessionId);
+      conditions.push(`s.cash_register_session_id = $${sqlParams.length}`);
+    }
+
+    const { rows } = await query(
+      `SELECT
+         s.cashier_user_id AS seller_user_id,
+         COALESCE(
+           NULLIF(u.username, ''),
+           NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''),
+           CONCAT('Usuario #', s.cashier_user_id)
+         ) AS seller_name,
+         COUNT(*)::int AS total_sales,
+         COALESCE(SUM(s.total), 0)::numeric(12,2) AS total_amount,
+         COALESCE(SUM(s.discount), 0)::numeric(12,2) AS total_discount,
+         COALESCE(SUM(s.tax), 0)::numeric(12,2) AS total_tax,
+         COALESCE(AVG(s.total), 0)::numeric(12,2) AS average_ticket,
+         MIN(s.sold_at) AS first_sale_at,
+         MAX(s.sold_at) AS last_sale_at
+       FROM sales s
+       LEFT JOIN users u ON u.id = s.cashier_user_id
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY s.cashier_user_id, seller_name
+       ORDER BY total_amount DESC, seller_name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalSales = rows.reduce((sum, row) => sum + Number(row.total_sales || 0), 0);
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
+    const weightedAverageTicket = totalSales > 0 ? totalAmount / totalSales : 0;
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ventas_por_vendedor.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ventas por Vendedor', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (sellerUserId) {
+      appliedFilters.push(`Vendedor ID: ${sellerUserId}`);
+    }
+    if (saleStatus) {
+      appliedFilters.push(`Estado: ${saleStatus}`);
+    } else {
+      appliedFilters.push('Estado: completed');
+    }
+    if (cashSessionId) {
+      appliedFilters.push(`Sesion caja: ${cashSessionId}`);
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Vendedores: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Ventas: ${totalSales}`, { continued: true });
+    doc.text(`  Total vendido: C$${totalAmount.toFixed(2)}`, { continued: true });
+    doc.text(`  Ticket promedio: C$${weightedAverageTicket.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay ventas registradas para los filtros seleccionados.');
+    } else {
+      const startY = doc.y;
+      doc.font('Helvetica-Bold');
+      doc.text('Vendedor', 20, startY, { width: 190, align: 'left' });
+      doc.text('Ventas', 210, startY, { width: 55, align: 'right' });
+      doc.text('Total (C$)', 265, startY, { width: 95, align: 'right' });
+      doc.text('Ticket prom.', 360, startY, { width: 90, align: 'right' });
+      doc.text('Descuento', 450, startY, { width: 90, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica');
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(row.seller_name, 20, y, { width: 190, align: 'left' });
+        doc.text(String(row.total_sales || 0), 210, y, { width: 55, align: 'right' });
+        doc.text(`C$${Number(row.total_amount || 0).toFixed(2)}`, 265, y, { width: 95, align: 'right' });
+        doc.text(`C$${Number(row.average_ticket || 0).toFixed(2)}`, 360, y, { width: 90, align: 'right' });
+        doc.text(`C$${Number(row.total_discount || 0).toFixed(2)}`, 450, y, { width: 90, align: 'right' });
+        doc.moveDown(0.5);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ventas por Vendedor', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/cash-sessions/options', async (_req, res, next) => {
   try {
     const result = await query(
