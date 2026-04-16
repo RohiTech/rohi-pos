@@ -235,6 +235,191 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/cash-sessions/options', async (_req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT id, status, opened_at, closed_at
+       FROM cash_register_sessions
+       ORDER BY opened_at DESC
+       LIMIT 100`
+    );
+
+    res.json({ ok: true, count: result.rowCount, data: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, session_id, session_status } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const sessionId = session_id ? Number.parseInt(String(session_id), 10) : null;
+    if (session_id && (!Number.isInteger(sessionId) || sessionId <= 0)) {
+      return res.status(400).json({ message: 'session_id debe ser un entero positivo' });
+    }
+
+    const sessionStatus = String(session_status || '').trim();
+    if (sessionStatus && !['open', 'closed'].includes(sessionStatus)) {
+      return res.status(400).json({ message: "session_status debe ser 'open' o 'closed'" });
+    }
+
+    const conditions = ['cs.opened_at::date BETWEEN $1 AND $2'];
+    const sqlParams = [fechaInicio, fechaFin];
+
+    if (sessionId) {
+      sqlParams.push(sessionId);
+      conditions.push(`cs.id = $${sqlParams.length}`);
+    }
+
+    if (sessionStatus) {
+      sqlParams.push(sessionStatus);
+      conditions.push(`cs.status = $${sqlParams.length}`);
+    }
+
+    const result = await query(
+      `SELECT
+         cs.id,
+         cs.status,
+         cs.opened_at,
+         cs.closed_at,
+         cs.opening_amount,
+         cs.closing_amount,
+         cs.expected_amount,
+         cs.difference_amount,
+         COUNT(DISTINCT s.id)::int AS total_sales,
+         COALESCE(SUM(s.total), 0)::numeric(12,2) AS total_sales_amount,
+         COALESCE(SUM(CASE WHEN p.payment_method = 'cash' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_cash,
+         COALESCE(SUM(CASE WHEN p.payment_method = 'card' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_card,
+         COALESCE(SUM(CASE WHEN p.payment_method = 'transfer' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_transfer,
+         COALESCE(SUM(CASE WHEN p.payment_method = 'mobile' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_mobile,
+         COALESCE(SUM(CASE WHEN p.payment_method = 'other' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_other
+       FROM cash_register_sessions cs
+       LEFT JOIN sales s
+         ON s.cash_register_session_id = cs.id
+        AND s.status = 'completed'
+       LEFT JOIN payments p
+         ON p.sale_id = s.id
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY
+         cs.id,
+         cs.status,
+         cs.opened_at,
+         cs.closed_at,
+         cs.opening_amount,
+         cs.closing_amount,
+         cs.expected_amount,
+         cs.difference_amount
+       ORDER BY cs.opened_at DESC`,
+      sqlParams
+    );
+
+    const rows = result.rows;
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.totalSales += Number(row.total_sales || 0);
+        acc.totalSalesAmount += Number(row.total_sales_amount || 0);
+        acc.totalCash += Number(row.total_cash || 0);
+        acc.totalCard += Number(row.total_card || 0);
+        acc.totalTransfer += Number(row.total_transfer || 0);
+        acc.totalMobile += Number(row.total_mobile || 0);
+        acc.totalOther += Number(row.total_other || 0);
+        return acc;
+      },
+      {
+        totalSales: 0,
+        totalSalesAmount: 0,
+        totalCash: 0,
+        totalCard: 0,
+        totalTransfer: 0,
+        totalMobile: 0,
+        totalOther: 0
+      }
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="resumen_caja.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte Resumen de Caja', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${fechaInicio}  Hasta: ${fechaFin}`, 20);
+    const filters = [];
+    if (sessionId) {
+      filters.push(`Sesion: ${sessionId}`);
+    }
+    if (sessionStatus) {
+      filters.push(`Estado: ${sessionStatus}`);
+    }
+    doc.text(`Filtros: ${filters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text(`Sesiones: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Ventas: ${totals.totalSales}`, { continued: true });
+    doc.text(`  Total vendido: C$${totals.totalSalesAmount.toFixed(2)}`);
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(10);
+    doc.text(
+      `Pagos - Efectivo: C$${totals.totalCash.toFixed(2)} | Tarjeta: C$${totals.totalCard.toFixed(2)} | Transferencia: C$${totals.totalTransfer.toFixed(2)} | Movil: C$${totals.totalMobile.toFixed(2)} | Otros: C$${totals.totalOther.toFixed(2)}`
+    );
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.text('No hay sesiones de caja en el rango de fechas seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Sesion', 20, headerY, { width: 45, align: 'left' });
+      doc.text('Estado', 65, headerY, { width: 50, align: 'left' });
+      doc.text('Apertura', 115, headerY, { width: 115, align: 'left' });
+      doc.text('Ventas', 230, headerY, { width: 40, align: 'right' });
+      doc.text('Total', 270, headerY, { width: 70, align: 'right' });
+      doc.text('Esperado', 340, headerY, { width: 70, align: 'right' });
+      doc.text('Cierre', 410, headerY, { width: 70, align: 'right' });
+      doc.text('Dif.', 480, headerY, { width: 70, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(String(row.id), 20, y, { width: 45, align: 'left' });
+        doc.text(row.status === 'open' ? 'Abierta' : 'Cerrada', 65, y, { width: 50, align: 'left' });
+        doc.text(new Date(row.opened_at).toLocaleString('es-NI'), 115, y, { width: 115, align: 'left' });
+        doc.text(String(row.total_sales || 0), 230, y, { width: 40, align: 'right' });
+        doc.text(`C$${Number(row.total_sales_amount || 0).toFixed(2)}`, 270, y, { width: 70, align: 'right' });
+        doc.text(`C$${Number(row.expected_amount || 0).toFixed(2)}`, 340, y, { width: 70, align: 'right' });
+        doc.text(`C$${Number(row.closing_amount || 0).toFixed(2)}`, 410, y, { width: 70, align: 'right' });
+        doc.text(`C$${Number(row.difference_amount || 0).toFixed(2)}`, 480, y, { width: 70, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte Resumen de Caja', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/membership-card/client/:clientId/pdf', async (req, res, next) => {
   try {
     const clientId = Number.parseInt(req.params.clientId, 10);

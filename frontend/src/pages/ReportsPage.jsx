@@ -58,6 +58,7 @@ function downloadDailySalesPdf() {
 
 export function ReportsPage() {
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
+  const [openCashSummaryModal, setOpenCashSummaryModal] = useState(false);
   const [params, setParams] = useState({
     fechaInicio: '',
     fechaFin: '',
@@ -68,6 +69,13 @@ export function ReportsPage() {
   const [categories, setCategories] = useState([]);
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [cashParams, setCashParams] = useState({
+    fechaInicio: '',
+    fechaFin: '',
+    sessionId: '',
+    sessionStatus: ''
+  });
+  const [cashSessions, setCashSessions] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -137,12 +145,40 @@ export function ReportsPage() {
     };
   }, [openProductSalesModal, params.productSearch, params.categoryId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!openCashSummaryModal) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    apiGet('/reports/cash-sessions/options')
+      .then((response) => {
+        if (isMounted) {
+          setCashSessions(response.data || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setCashSessions([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [openCashSummaryModal]);
+
   const handleOpenProductSales = () => setOpenProductSalesModal(true);
   const handleCloseProductSales = () => {
     setOpenProductSalesModal(false);
     setProductSuggestions([]);
     setLoadingSuggestions(false);
   };
+  const handleOpenCashSummary = () => setOpenCashSummaryModal(true);
+  const handleCloseCashSummary = () => setOpenCashSummaryModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -157,6 +193,11 @@ export function ReportsPage() {
     }
 
     setParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleCashParamsChange = (e) => {
+    const { name, value } = e.target;
+    setCashParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -201,6 +242,40 @@ export function ReportsPage() {
     setOpenProductSalesModal(false);
   };
 
+  const handleCashSummaryReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: cashParams.fechaInicio,
+      fechaFin: cashParams.fechaFin,
+      session_id: cashParams.sessionId,
+      session_status: cashParams.sessionStatus
+    });
+
+    fetch(`http://localhost:3001/api/reports/cash-summary/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'resumen_caja.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenCashSummaryModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -226,6 +301,13 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenProductSales}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Resumen de caja' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenCashSummary}
                     >
                       {report}
                     </button>
@@ -302,6 +384,76 @@ export function ReportsPage() {
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={handleCloseProductSales} className="px-3 py-1 rounded bg-gray-200">Cancelar</button>
             <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">Ver reporte</button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openCashSummaryModal} onClose={handleCloseCashSummary}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de resumen de caja</h2>
+        <form onSubmit={handleCashSummaryReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={cashParams.fechaInicio}
+              onChange={handleCashParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={cashParams.fechaFin}
+              onChange={handleCashParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Sesión de caja (opcional)</span>
+            <select
+              name="sessionId"
+              value={cashParams.sessionId}
+              onChange={handleCashParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas las sesiones</option>
+              {cashSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  Sesión #{session.id} - {session.status === 'open' ? 'Abierta' : 'Cerrada'} -{' '}
+                  {new Date(session.opened_at).toLocaleDateString('es-NI')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado de sesión (opcional)</span>
+            <select
+              name="sessionStatus"
+              value={cashParams.sessionStatus}
+              onChange={handleCashParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="open">Abierta</option>
+              <option value="closed">Cerrada</option>
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseCashSummary}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
           </div>
         </form>
       </SimpleModal>
