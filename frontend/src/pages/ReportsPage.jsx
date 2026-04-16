@@ -73,11 +73,10 @@ export function ReportsPage() {
       fechaInicio: params.fechaInicio,
       fechaFin: params.fechaFin
     });
-    const token = localStorage.getItem('rohipos_token') || '';
     fetch(`http://localhost:3001/api/reports/product-sales/pdf${query}`, {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${authToken}`
       }
     })
       .then(response => {

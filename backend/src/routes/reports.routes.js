@@ -60,7 +60,7 @@ reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
     // Query para ventas por producto
     const { rows } = await query(
       `SELECT p.name AS producto, SUM(si.quantity) AS cantidad_vendida, SUM(si.line_total) AS total_vendido
-       FROM sales_items si
+       FROM sale_items si
        JOIN products p ON si.product_id = p.id
        JOIN sales s ON si.sale_id = s.id
        WHERE s.sold_at::date BETWEEN $1 AND $2 AND s.status = 'completed'
