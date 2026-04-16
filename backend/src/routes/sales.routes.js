@@ -646,6 +646,11 @@ salesRouter.post('/:id/cancel', async (request, response, next) => {
       throw createHttpError(400, 'Sale id must be a positive integer');
     }
 
+    const cancelledByUserId = Number(request.user?.id);
+    if (!Number.isInteger(cancelledByUserId) || cancelledByUserId <= 0) {
+      throw createHttpError(401, 'User session is invalid');
+    }
+
     const reason = String(request.body?.reason || '').trim();
 
     await withTransaction(async (dbClient) => {
@@ -703,9 +708,9 @@ salesRouter.post('/:id/cancel', async (request, response, next) => {
 
       await dbClient.query(
         `UPDATE sales
-         SET status = 'cancelled', notes = $1
-         WHERE id = $2`,
-        [cancellationNote, saleId]
+         SET status = 'cancelled', notes = $1, cancelled_at = NOW(), cancelled_by_user_id = $2
+         WHERE id = $3`,
+        [cancellationNote, cancelledByUserId, saleId]
       );
 
       await dbClient.query(

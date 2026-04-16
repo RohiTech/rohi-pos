@@ -92,14 +92,22 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
        s.sale_number,
        s.total,
        s.sold_at,
+       s.cancelled_at,
        u.username AS cashier_username
      FROM sales s
      LEFT JOIN users u ON u.id = s.cashier_user_id
-     WHERE s.cash_register_session_id = $1
-       AND s.status = 'cancelled'
-     ORDER BY s.sold_at DESC, s.id DESC
+     WHERE s.status = 'cancelled'
+       AND (
+         s.cash_register_session_id = $1
+         OR (
+           s.cancelled_at IS NOT NULL
+           AND s.cancelled_at >= $2
+           AND s.cancelled_at <= COALESCE($3, NOW())
+         )
+       )
+     ORDER BY COALESCE(s.cancelled_at, s.sold_at) DESC, s.id DESC
      LIMIT 200`,
-    [sessionId]
+    [sessionId, session.opened_at, session.closed_at]
   );
 
   const paymentBreakdownResult = await runner.query(
