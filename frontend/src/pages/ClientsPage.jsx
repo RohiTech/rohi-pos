@@ -207,11 +207,6 @@ export function ClientsPage() {
 
     const normalizedPhone = normalizeWhatsappPhone(form.phone);
 
-    if (!normalizedPhone || normalizedPhone.length < 8) {
-      setError('Registra un numero de telefono valido para enviar por WhatsApp');
-      return;
-    }
-
     setSendingWhatsapp(true);
 
     try {
@@ -248,7 +243,10 @@ export function ClientsPage() {
       anchor.download = `qr_cliente_${fileNameCode}.png`;
       anchor.click();
 
-      const whatsappUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
+      const whatsappBaseUrl = normalizedPhone
+        ? `https://wa.me/${normalizedPhone}`
+        : 'https://wa.me/';
+      const whatsappUrl = `${whatsappBaseUrl}?text=${encodeURIComponent(
         `${whatsappMessage} Te adjuntamos la imagen del QR descargada.`
       )}`;
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
@@ -257,6 +255,25 @@ export function ClientsPage() {
       setError(requestError.message || 'No fue posible preparar el envio por WhatsApp');
     } finally {
       setSendingWhatsapp(false);
+    }
+  }
+
+  async function handleCopyPhone() {
+    setError('');
+    setMessage('');
+
+    const phone = String(form.phone || '').trim();
+
+    if (!phone) {
+      setError('No hay numero de telefono para copiar');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(phone);
+      setMessage('Numero de telefono copiado al portapapeles.');
+    } catch (_error) {
+      setError('No fue posible copiar el numero. Verifica permisos del navegador.');
     }
   }
 
@@ -559,7 +576,7 @@ export function ClientsPage() {
                   ) : null}
                   <button
                     className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
-                    disabled={sendingWhatsapp || !String(form.client_code || '').trim() || !String(form.phone || '').trim()}
+                    disabled={sendingWhatsapp || !String(form.client_code || '').trim()}
                     onClick={handleSendWhatsappQr}
                     type="button"
                   >
@@ -567,7 +584,7 @@ export function ClientsPage() {
                   </button>
                 </div>
                 <p className="text-xs text-brand-forest/70">
-                  Requiere telefono del cliente. En tablet/movil comparte la imagen directo; en desktop abre WhatsApp y descarga el QR.
+                  En tablet/movil comparte la imagen directo; en desktop abre WhatsApp y descarga el QR.
                 </p>
               </label>
               <label className="grid gap-2">
@@ -606,7 +623,17 @@ export function ClientsPage() {
               </label>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Telefono</span>
-                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="phone" onChange={handleChange} value={form.phone} />
+                <div className="flex flex-wrap gap-2">
+                  <input className="min-w-0 flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" name="phone" onChange={handleChange} value={form.phone} />
+                  <button
+                    className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                    disabled={!String(form.phone || '').trim()}
+                    onClick={handleCopyPhone}
+                    type="button"
+                  >
+                    Copiar
+                  </button>
+                </div>
               </label>
             </div>
 

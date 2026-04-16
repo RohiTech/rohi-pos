@@ -464,46 +464,6 @@ export function AttendancePage() {
               </button>
             </form>
 
-            <div className="mt-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/30 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-brand-forest/80">
-                  Escaneo QR con camara para buscar cliente y marcar asistencia automaticamente.
-                </p>
-                <button
-                  className="rounded-2xl bg-brand-forest px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white"
-                  onClick={() => setScannerEnabled((current) => !current)}
-                  type="button"
-                >
-                  {scannerEnabled ? 'Detener camara' : 'Escanear QR'}
-                </button>
-              </div>
-
-              {scannerEnabled ? (
-                <div className="mt-4">
-                  <div className="overflow-hidden rounded-2xl border border-brand-sand/70 bg-white p-2">
-                    <div id={scannerElementId} />
-                  </div>
-                  <p className="mt-2 text-xs text-brand-forest/70">
-                    {scannerReady
-                      ? 'Camara activa. Apunta al QR del carnet para registrar asistencia.'
-                      : 'Iniciando camara...'}
-                  </p>
-                  {lastQrValue ? (
-                    <p className="mt-1 text-xs text-brand-forest/70">
-                      Ultimo QR detectado: {lastQrValue}
-                    </p>
-                  ) : null}
-                  {scanInfo ? (
-                    <p className="mt-2 rounded-xl bg-brand-cream/60 px-3 py-2 text-xs font-semibold text-brand-forest">
-                      {scanInfo}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {cameraError ? <p className="mt-3 text-sm text-rose-600">{cameraError}</p> : null}
-            </div>
-
             {loading ? <p className="mt-4 text-sm text-brand-forest/70">Cargando clientes...</p> : null}
 
             {!loading && !clients.length ? (
