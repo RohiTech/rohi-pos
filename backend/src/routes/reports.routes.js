@@ -475,6 +475,689 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/active-clients/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      search: searchRaw,
+      only_with_active_membership: onlyWithActiveMembershipRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const onlyWithActiveMembership = String(onlyWithActiveMembershipRaw || '').trim() === 'true';
+
+    const conditions = ['c.is_active = TRUE', 'c.join_date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.email, '') ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (onlyWithActiveMembership) {
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM memberships m2
+        WHERE m2.client_id = c.id
+          AND m2.status = 'active'
+          AND CURRENT_DATE BETWEEN m2.start_date AND m2.end_date
+      )`);
+    }
+
+    const { rows } = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.email,
+         c.phone,
+         c.join_date,
+         latest_m.membership_number,
+         latest_m.status AS membership_status,
+         latest_m.end_date AS membership_end_date,
+         latest_mp.name AS membership_plan_name,
+         EXISTS (
+           SELECT 1
+           FROM memberships ma
+           WHERE ma.client_id = c.id
+             AND ma.status = 'active'
+             AND CURRENT_DATE BETWEEN ma.start_date AND ma.end_date
+         ) AS has_active_membership
+       FROM clients c
+       LEFT JOIN LATERAL (
+         SELECT m.membership_number, m.status, m.end_date, m.plan_id
+         FROM memberships m
+         WHERE m.client_id = c.id
+         ORDER BY m.end_date DESC, m.id DESC
+         LIMIT 1
+       ) latest_m ON TRUE
+       LEFT JOIN membership_plans latest_mp ON latest_mp.id = latest_m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.join_date DESC, c.id DESC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const withActiveMembershipCount = rows.reduce(
+      (sum, row) => sum + (row.has_active_membership ? 1 : 0),
+      0
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="clientes_activos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Clientes Activos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (search) {
+      appliedFilters.push(`Busqueda: ${search}`);
+    }
+    appliedFilters.push(
+      onlyWithActiveMembership
+        ? 'Solo clientes con membresia activa vigente'
+        : 'Todos los clientes activos'
+    );
+    doc.text(`Filtros: ${appliedFilters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Clientes activos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Con membresia activa: ${withActiveMembershipCount}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay clientes activos para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Codigo', 20, headerY, { width: 70, align: 'left' });
+      doc.text('Cliente', 90, headerY, { width: 160, align: 'left' });
+      doc.text('Contacto', 250, headerY, { width: 130, align: 'left' });
+      doc.text('Fecha ingreso', 380, headerY, { width: 70, align: 'center' });
+      doc.text('Membresia', 450, headerY, { width: 90, align: 'center' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const membershipLabel = row.has_active_membership
+          ? `Activa (${row.membership_plan_name || 'Plan'})`
+          : 'No activa';
+        const contactLabel = row.email || row.phone || '--';
+
+        doc.text(row.client_code || `#${row.id}`, 20, y, { width: 70, align: 'left' });
+        doc.text(`${row.first_name || ''} ${row.last_name || ''}`.trim(), 90, y, {
+          width: 160,
+          align: 'left'
+        });
+        doc.text(contactLabel, 250, y, { width: 130, align: 'left' });
+        doc.text(new Date(row.join_date).toLocaleDateString('es-NI'), 380, y, {
+          width: 70,
+          align: 'center'
+        });
+        doc.text(membershipLabel, 450, y, { width: 90, align: 'center' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Clientes Activos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/new-clients/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      search: searchRaw,
+      active_status: activeStatusRaw,
+      with_membership: withMembershipRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const activeStatus = String(activeStatusRaw || '').trim();
+    if (activeStatus && !['active', 'inactive'].includes(activeStatus)) {
+      return res.status(400).json({ message: "active_status debe ser 'active' o 'inactive'" });
+    }
+
+    const withMembership = String(withMembershipRaw || '').trim() === 'true';
+
+    const conditions = ['c.join_date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.email, '') ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (activeStatus === 'active') {
+      conditions.push('c.is_active = TRUE');
+    }
+    if (activeStatus === 'inactive') {
+      conditions.push('c.is_active = FALSE');
+    }
+
+    if (withMembership) {
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM memberships mx
+        WHERE mx.client_id = c.id
+      )`);
+    }
+
+    const { rows } = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.email,
+         c.phone,
+         c.join_date,
+         c.is_active,
+         COALESCE(mb.memberships_count, 0)::int AS memberships_count,
+         latest_m.membership_number,
+         latest_m.status AS membership_status,
+         latest_m.end_date AS membership_end_date,
+         latest_mp.name AS membership_plan_name
+       FROM clients c
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS memberships_count
+         FROM memberships m_count
+         WHERE m_count.client_id = c.id
+       ) mb ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT m.membership_number, m.status, m.end_date, m.plan_id
+         FROM memberships m
+         WHERE m.client_id = c.id
+         ORDER BY m.end_date DESC, m.id DESC
+         LIMIT 1
+       ) latest_m ON TRUE
+       LEFT JOIN membership_plans latest_mp ON latest_mp.id = latest_m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.join_date DESC, c.id DESC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalActive = rows.reduce((sum, row) => sum + (row.is_active ? 1 : 0), 0);
+    const totalInactive = rows.length - totalActive;
+    const totalWithMembership = rows.reduce(
+      (sum, row) => sum + (Number(row.memberships_count || 0) > 0 ? 1 : 0),
+      0
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="clientes_nuevos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Clientes Nuevos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (search) {
+      appliedFilters.push(`Busqueda: ${search}`);
+    }
+    if (activeStatus === 'active') {
+      appliedFilters.push('Estado cliente: activo');
+    } else if (activeStatus === 'inactive') {
+      appliedFilters.push('Estado cliente: inactivo');
+    } else {
+      appliedFilters.push('Estado cliente: todos');
+    }
+    if (withMembership) {
+      appliedFilters.push('Solo clientes con membresia');
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Clientes nuevos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Activos: ${totalActive}`, { continued: true });
+    doc.text(`  Inactivos: ${totalInactive}`, { continued: true });
+    doc.text(`  Con membresia: ${totalWithMembership}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay clientes nuevos para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Codigo', 20, headerY, { width: 65, align: 'left' });
+      doc.text('Cliente', 85, headerY, { width: 150, align: 'left' });
+      doc.text('Contacto', 235, headerY, { width: 120, align: 'left' });
+      doc.text('Ingreso', 355, headerY, { width: 65, align: 'center' });
+      doc.text('Estado', 420, headerY, { width: 50, align: 'center' });
+      doc.text('Membresia', 470, headerY, { width: 70, align: 'center' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const contactLabel = row.email || row.phone || '--';
+        const membershipLabel = Number(row.memberships_count || 0) > 0
+          ? latestMembershipLabel(row.membership_plan_name, row.membership_status)
+          : 'Sin membresia';
+
+        doc.text(row.client_code || `#${row.id}`, 20, y, { width: 65, align: 'left' });
+        doc.text(`${row.first_name || ''} ${row.last_name || ''}`.trim(), 85, y, {
+          width: 150,
+          align: 'left'
+        });
+        doc.text(contactLabel, 235, y, { width: 120, align: 'left' });
+        doc.text(new Date(row.join_date).toLocaleDateString('es-NI'), 355, y, {
+          width: 65,
+          align: 'center'
+        });
+        doc.text(row.is_active ? 'Activo' : 'Inactivo', 420, y, { width: 50, align: 'center' });
+        doc.text(membershipLabel, 470, y, { width: 70, align: 'center' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Clientes Nuevos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/inactive-clients/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      search: searchRaw,
+      with_membership: withMembershipRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const withMembership = String(withMembershipRaw || '').trim() === 'true';
+
+    const conditions = ['c.is_active = FALSE', 'c.join_date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.email, '') ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (withMembership) {
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM memberships mx
+        WHERE mx.client_id = c.id
+      )`);
+    }
+
+    const { rows } = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.email,
+         c.phone,
+         c.join_date,
+         COALESCE(mb.memberships_count, 0)::int AS memberships_count,
+         latest_m.membership_number,
+         latest_m.status AS membership_status,
+         latest_m.end_date AS membership_end_date,
+         latest_mp.name AS membership_plan_name
+       FROM clients c
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS memberships_count
+         FROM memberships m_count
+         WHERE m_count.client_id = c.id
+       ) mb ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT m.membership_number, m.status, m.end_date, m.plan_id
+         FROM memberships m
+         WHERE m.client_id = c.id
+         ORDER BY m.end_date DESC, m.id DESC
+         LIMIT 1
+       ) latest_m ON TRUE
+       LEFT JOIN membership_plans latest_mp ON latest_mp.id = latest_m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.join_date DESC, c.id DESC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalWithMembership = rows.reduce(
+      (sum, row) => sum + (Number(row.memberships_count || 0) > 0 ? 1 : 0),
+      0
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="clientes_inactivos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Clientes Inactivos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (search) {
+      appliedFilters.push(`Busqueda: ${search}`);
+    }
+    if (withMembership) {
+      appliedFilters.push('Solo clientes con membresia');
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Clientes inactivos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Con membresia: ${totalWithMembership}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay clientes inactivos para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Codigo', 20, headerY, { width: 70, align: 'left' });
+      doc.text('Cliente', 90, headerY, { width: 170, align: 'left' });
+      doc.text('Contacto', 260, headerY, { width: 130, align: 'left' });
+      doc.text('Ingreso', 390, headerY, { width: 70, align: 'center' });
+      doc.text('Membresia', 460, headerY, { width: 80, align: 'center' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const contactLabel = row.email || row.phone || '--';
+        const membershipLabel = Number(row.memberships_count || 0) > 0
+          ? latestMembershipLabel(row.membership_plan_name, row.membership_status)
+          : 'Sin membresia';
+
+        doc.text(row.client_code || `#${row.id}`, 20, y, { width: 70, align: 'left' });
+        doc.text(`${row.first_name || ''} ${row.last_name || ''}`.trim(), 90, y, {
+          width: 170,
+          align: 'left'
+        });
+        doc.text(contactLabel, 260, y, { width: 130, align: 'left' });
+        doc.text(new Date(row.join_date).toLocaleDateString('es-NI'), 390, y, {
+          width: 70,
+          align: 'center'
+        });
+        doc.text(membershipLabel, 460, y, { width: 80, align: 'center' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Clientes Inactivos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/memberships-by-client/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      client_search: clientSearchRaw,
+      status: membershipStatusRaw,
+      plan_id: planIdRaw,
+      only_active_clients: onlyActiveClientsRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const clientSearch = String(clientSearchRaw || '').trim();
+    const membershipStatus = String(membershipStatusRaw || '').trim();
+    if (membershipStatus && !['pending', 'active', 'expired', 'cancelled'].includes(membershipStatus)) {
+      return res.status(400).json({ message: 'status debe ser pending, active, expired o cancelled' });
+    }
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const onlyActiveClients = String(onlyActiveClientsRaw || '').trim() === 'true';
+
+    const conditions = ['m.start_date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (clientSearch) {
+      sqlParams.push(`%${clientSearch}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.email, '') ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (membershipStatus) {
+      sqlParams.push(membershipStatus);
+      conditions.push(`m.status = $${sqlParams.length}`);
+    }
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    if (onlyActiveClients) {
+      conditions.push('c.is_active = TRUE');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         m.id,
+         m.membership_number,
+         m.start_date,
+         m.end_date,
+         m.status,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         (m.price - m.discount - m.amount_paid) AS balance_due,
+         m.client_id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.email,
+         c.phone,
+         c.is_active AS client_is_active,
+         mp.name AS plan_name
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.last_name ASC, c.first_name ASC, m.start_date DESC, m.id DESC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.price || 0), 0);
+    const totalPaid = rows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+    const totalBalance = rows.reduce((sum, row) => sum + Number(row.balance_due || 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias_por_cliente.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Membresias por Cliente', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const appliedFilters = [];
+    if (clientSearch) {
+      appliedFilters.push(`Cliente: ${clientSearch}`);
+    }
+    if (membershipStatus) {
+      appliedFilters.push(`Estado membresia: ${membershipStatus}`);
+    }
+    if (planId) {
+      appliedFilters.push(`Plan ID: ${planId}`);
+    }
+    if (onlyActiveClients) {
+      appliedFilters.push('Solo clientes activos');
+    }
+    doc.text(`Filtros: ${appliedFilters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Membresias: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Monto: C$${totalAmount.toFixed(2)}`, { continued: true });
+    doc.text(`  Pagado: C$${totalPaid.toFixed(2)}`, { continued: true });
+    doc.text(`  Saldo: C$${totalBalance.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay membresias para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 150, align: 'left' });
+      doc.text('Plan', 170, headerY, { width: 95, align: 'left' });
+      doc.text('Estado', 265, headerY, { width: 55, align: 'center' });
+      doc.text('Vigencia', 320, headerY, { width: 90, align: 'center' });
+      doc.text('Precio', 410, headerY, { width: 45, align: 'right' });
+      doc.text('Pagado', 455, headerY, { width: 45, align: 'right' });
+      doc.text('Saldo', 500, headerY, { width: 45, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+
+        doc.text(clientLabel, 20, y, { width: 150, align: 'left' });
+        doc.text(row.plan_name || '--', 170, y, { width: 95, align: 'left' });
+        doc.text(row.status || '--', 265, y, { width: 55, align: 'center' });
+        doc.text(
+          `${new Date(row.start_date).toLocaleDateString('es-NI')} - ${new Date(row.end_date).toLocaleDateString('es-NI')}`,
+          320,
+          y,
+          { width: 90, align: 'center' }
+        );
+        doc.text(`C$${Number(row.price || 0).toFixed(2)}`, 410, y, { width: 45, align: 'right' });
+        doc.text(`C$${Number(row.amount_paid || 0).toFixed(2)}`, 455, y, { width: 45, align: 'right' });
+        doc.text(`C$${Number(row.balance_due || 0).toFixed(2)}`, 500, y, { width: 45, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Membresias por Cliente', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+function latestMembershipLabel(planName, status) {
+  if (!planName) {
+    return 'Con membresia';
+  }
+
+  if (!status) {
+    return planName;
+  }
+
+  return `${planName} (${status})`;
+}
+
 reportsRouter.get('/cash-sessions/options', async (_req, res, next) => {
   try {
     const result = await query(

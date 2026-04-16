@@ -41,6 +41,10 @@ export function ReportsPage() {
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
   const [openCashSummaryModal, setOpenCashSummaryModal] = useState(false);
   const [openSellerSalesModal, setOpenSellerSalesModal] = useState(false);
+  const [openActiveClientsModal, setOpenActiveClientsModal] = useState(false);
+  const [openNewClientsModal, setOpenNewClientsModal] = useState(false);
+  const [openInactiveClientsModal, setOpenInactiveClientsModal] = useState(false);
+  const [openMembershipsByClientModal, setOpenMembershipsByClientModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: getTodayDateString(),
     fechaFin: getTodayDateString(),
@@ -73,6 +77,34 @@ export function ReportsPage() {
     sessionStatus: ''
   });
   const [cashSessions, setCashSessions] = useState([]);
+  const [activeClientsParams, setActiveClientsParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    search: '',
+    onlyWithActiveMembership: false
+  });
+  const [newClientsParams, setNewClientsParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    search: '',
+    activeStatus: '',
+    withMembership: false
+  });
+  const [inactiveClientsParams, setInactiveClientsParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    search: '',
+    withMembership: false
+  });
+  const [membershipsByClientParams, setMembershipsByClientParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    clientSearch: '',
+    status: '',
+    planId: '',
+    onlyActiveClients: false
+  });
+  const [membershipPlans, setMembershipPlans] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -199,6 +231,32 @@ export function ReportsPage() {
     };
   }, [openCashSummaryModal]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!openMembershipsByClientModal) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    apiGet('/membership-plans?limit=100')
+      .then((response) => {
+        if (isMounted) {
+          setMembershipPlans(response.data || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setMembershipPlans([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [openMembershipsByClientModal]);
+
   const handleOpenDailySales = () => setOpenDailySalesModal(true);
   const handleCloseDailySales = () => setOpenDailySalesModal(false);
   const handleOpenProductSales = () => setOpenProductSalesModal(true);
@@ -211,6 +269,14 @@ export function ReportsPage() {
   const handleCloseCashSummary = () => setOpenCashSummaryModal(false);
   const handleOpenSellerSales = () => setOpenSellerSalesModal(true);
   const handleCloseSellerSales = () => setOpenSellerSalesModal(false);
+  const handleOpenActiveClients = () => setOpenActiveClientsModal(true);
+  const handleCloseActiveClients = () => setOpenActiveClientsModal(false);
+  const handleOpenNewClients = () => setOpenNewClientsModal(true);
+  const handleCloseNewClients = () => setOpenNewClientsModal(false);
+  const handleOpenInactiveClients = () => setOpenInactiveClientsModal(true);
+  const handleCloseInactiveClients = () => setOpenInactiveClientsModal(false);
+  const handleOpenMembershipsByClient = () => setOpenMembershipsByClientModal(true);
+  const handleCloseMembershipsByClient = () => setOpenMembershipsByClientModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -240,6 +306,38 @@ export function ReportsPage() {
   const handleSellerParamsChange = (e) => {
     const { name, value } = e.target;
     setSellerParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleActiveClientsParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setActiveClientsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleNewClientsParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setNewClientsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleInactiveClientsParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setInactiveClientsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleMembershipsByClientParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setMembershipsByClientParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
   };
 
   const handleSelectProduct = (product) => {
@@ -388,6 +486,145 @@ export function ReportsPage() {
     setOpenSellerSalesModal(false);
   };
 
+  const handleActiveClientsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: activeClientsParams.fechaInicio,
+      fechaFin: activeClientsParams.fechaFin,
+      search: activeClientsParams.search.trim(),
+      only_with_active_membership: activeClientsParams.onlyWithActiveMembership
+    });
+
+    fetch(`http://localhost:3001/api/reports/active-clients/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clientes_activos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenActiveClientsModal(false);
+  };
+
+  const handleNewClientsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: newClientsParams.fechaInicio,
+      fechaFin: newClientsParams.fechaFin,
+      search: newClientsParams.search.trim(),
+      active_status: newClientsParams.activeStatus,
+      with_membership: newClientsParams.withMembership
+    });
+
+    fetch(`http://localhost:3001/api/reports/new-clients/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clientes_nuevos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenNewClientsModal(false);
+  };
+
+  const handleInactiveClientsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: inactiveClientsParams.fechaInicio,
+      fechaFin: inactiveClientsParams.fechaFin,
+      search: inactiveClientsParams.search.trim(),
+      with_membership: inactiveClientsParams.withMembership
+    });
+
+    fetch(`http://localhost:3001/api/reports/inactive-clients/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clientes_inactivos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenInactiveClientsModal(false);
+  };
+
+  const handleMembershipsByClientReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: membershipsByClientParams.fechaInicio,
+      fechaFin: membershipsByClientParams.fechaFin,
+      client_search: membershipsByClientParams.clientSearch.trim(),
+      status: membershipsByClientParams.status,
+      plan_id: membershipsByClientParams.planId,
+      only_active_clients: membershipsByClientParams.onlyActiveClients
+    });
+
+    fetch(`http://localhost:3001/api/reports/memberships-by-client/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'membresias_por_cliente.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenMembershipsByClientModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -427,6 +664,34 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenSellerSales}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Clientes activos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenActiveClients}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Clientes nuevos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenNewClients}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Clientes inactivos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenInactiveClients}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Membresías por cliente' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenMembershipsByClient}
                     >
                       {report}
                     </button>
@@ -736,6 +1001,290 @@ export function ReportsPage() {
             <button
               type="button"
               onClick={handleCloseSellerSales}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openActiveClientsModal} onClose={handleCloseActiveClients}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de clientes activos</h2>
+        <form onSubmit={handleActiveClientsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={activeClientsParams.fechaInicio}
+              onChange={handleActiveClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={activeClientsParams.fechaFin}
+              onChange={handleActiveClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={activeClientsParams.search}
+              onChange={handleActiveClientsParamsChange}
+              placeholder="Código, nombre, correo o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyWithActiveMembership"
+              checked={activeClientsParams.onlyWithActiveMembership}
+              onChange={handleActiveClientsParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo con membresía activa vigente</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseActiveClients}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openNewClientsModal} onClose={handleCloseNewClients}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de clientes nuevos</h2>
+        <form onSubmit={handleNewClientsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={newClientsParams.fechaInicio}
+              onChange={handleNewClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={newClientsParams.fechaFin}
+              onChange={handleNewClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={newClientsParams.search}
+              onChange={handleNewClientsParamsChange}
+              placeholder="Código, nombre, correo o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado del cliente (opcional)</span>
+            <select
+              name="activeStatus"
+              value={newClientsParams.activeStatus}
+              onChange={handleNewClientsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="active">Activos</option>
+              <option value="inactive">Inactivos</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="withMembership"
+              checked={newClientsParams.withMembership}
+              onChange={handleNewClientsParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes con membresía</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseNewClients}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openInactiveClientsModal} onClose={handleCloseInactiveClients}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de clientes inactivos</h2>
+        <form onSubmit={handleInactiveClientsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={inactiveClientsParams.fechaInicio}
+              onChange={handleInactiveClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={inactiveClientsParams.fechaFin}
+              onChange={handleInactiveClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={inactiveClientsParams.search}
+              onChange={handleInactiveClientsParamsChange}
+              placeholder="Código, nombre, correo o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="withMembership"
+              checked={inactiveClientsParams.withMembership}
+              onChange={handleInactiveClientsParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes con membresía</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseInactiveClients}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openMembershipsByClientModal} onClose={handleCloseMembershipsByClient}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías por cliente</h2>
+        <form onSubmit={handleMembershipsByClientReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={membershipsByClientParams.fechaInicio}
+              onChange={handleMembershipsByClientParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={membershipsByClientParams.fechaFin}
+              onChange={handleMembershipsByClientParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Cliente (búsqueda opcional)</span>
+            <input
+              type="text"
+              name="clientSearch"
+              value={membershipsByClientParams.clientSearch}
+              onChange={handleMembershipsByClientParamsChange}
+              placeholder="Código, nombre, correo o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado de membresía (opcional)</span>
+            <select
+              name="status"
+              value={membershipsByClientParams.status}
+              onChange={handleMembershipsByClientParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="active">Activa</option>
+              <option value="pending">Pendiente</option>
+              <option value="expired">Expirada</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={membershipsByClientParams.planId}
+              onChange={handleMembershipsByClientParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyActiveClients"
+              checked={membershipsByClientParams.onlyActiveClients}
+              onChange={handleMembershipsByClientParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes activos</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseMembershipsByClient}
               className="px-3 py-1 rounded bg-gray-200"
             >
               Cancelar
