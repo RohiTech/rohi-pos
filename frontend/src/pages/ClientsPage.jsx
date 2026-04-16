@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -49,6 +49,8 @@ const PAGE_SIZE = 8;
 const REPORTS_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 export function ClientsPage() {
+  const cameraVideoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const [activeView, setActiveView] = useState('list');
   const [clients, setClients] = useState([]);
   const [search, setSearch] = useState('');
@@ -66,10 +68,29 @@ export function ClientsPage() {
   const [exporting, setExporting] = useState(false);
   const [cardLoading, setCardLoading] = useState(false);
   const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [startingCamera, setStartingCamera] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState('user');
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [qrGenerating, setQrGenerating] = useState(false);
+  const [photoViewerSrc, setPhotoViewerSrc] = useState('');
+  const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
   const [editingClientId, setEditingClientId] = useState(null);
   const [form, setForm] = useState(initialClientForm);
+
+  function openPhotoViewer(src, alt = 'Foto de cliente') {
+    if (!src) {
+      return;
+    }
+
+    setPhotoViewerSrc(src);
+    setPhotoViewerAlt(alt);
+  }
+
+  function closePhotoViewer() {
+    setPhotoViewerSrc('');
+    setPhotoViewerAlt('Foto de cliente');
+  }
 
   async function loadClients() {
     setLoading(true);
@@ -106,6 +127,15 @@ export function ClientsPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [search]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+    };
+  }, []);
 
   function handleChange(event) {
     const { name, value, type, checked } = event.target;
@@ -355,9 +385,166 @@ export function ClientsPage() {
         photo_url: photoDataUrl
       }));
       setError('');
+      setMessage('Foto del cliente cargada correctamente.');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible cargar la foto del cliente');
+    } finally {
+      if (event.target) {
+        event.target.value = '';
+      }
     }
+  }
+
+  function stopCamera() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+
+    setIsCameraOpen(false);
+  }
+
+  async function startCamera(preferredFacingMode = 'user') {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Tu navegador no soporta camara en vivo para capturar foto.');
+      return;
+    }
+
+    setStartingCamera(true);
+
+    try {
+      stopCamera();
+
+      const secondaryFacingMode = preferredFacingMode === 'user' ? 'environment' : 'user';
+      let stream;
+      let resolvedFacingMode = preferredFacingMode;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: preferredFacingMode
+          },
+          audio: false
+        });
+      } catch (_preferredCameraError) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: secondaryFacingMode
+            },
+            audio: false
+          });
+          resolvedFacingMode = secondaryFacingMode;
+        } catch (_secondaryCameraError) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+      }
+
+      cameraStreamRef.current = stream;
+      setIsCameraOpen(true);
+
+      // Wait one frame so the camera overlay and <video> element are mounted.
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
+      if (!cameraVideoRef.current) {
+        throw new Error('No fue posible preparar la vista de camara');
+      }
+
+      cameraVideoRef.current.srcObject = stream;
+      await new Promise((resolve) => {
+        const videoElement = cameraVideoRef.current;
+
+        if (!videoElement) {
+          resolve();
+          return;
+        }
+
+        if (videoElement.readyState >= 1) {
+          resolve();
+          return;
+        }
+
+        const onReady = () => {
+          videoElement.removeEventListener('loadedmetadata', onReady);
+          clearTimeout(metadataTimeoutId);
+          resolve();
+        };
+
+        videoElement.addEventListener('loadedmetadata', onReady);
+
+        const metadataTimeoutId = setTimeout(() => {
+          videoElement.removeEventListener('loadedmetadata', onReady);
+          resolve();
+        }, 3000);
+      });
+
+      await cameraVideoRef.current.play().catch(() => {});
+      setCameraFacingMode(resolvedFacingMode);
+      setIsCameraOpen(true);
+      setMessage('Camara activa. Ajusta el encuadre y presiona capturar.');
+    } catch (_cameraError) {
+      setError('No se pudo abrir la camara en vivo. Verifica permisos de camara y que el sitio este en localhost o HTTPS.');
+      stopCamera();
+    } finally {
+      setStartingCamera(false);
+    }
+  }
+
+  async function handleTakePhoto() {
+    setError('');
+    setMessage('');
+    await startCamera(cameraFacingMode || 'user');
+  }
+
+  async function handleSwitchCamera() {
+    setError('');
+    setMessage('');
+    const nextFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+    await startCamera(nextFacingMode);
+  }
+
+  function handleCaptureFromCamera() {
+    setError('');
+    setMessage('');
+
+    if (!cameraVideoRef.current) {
+      setError('La camara no esta disponible para capturar foto');
+      return;
+    }
+
+    const { videoWidth, videoHeight } = cameraVideoRef.current;
+
+    if (!videoWidth || !videoHeight) {
+      setError('Esperando imagen de camara. Intenta capturar nuevamente.');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      setError('No fue posible procesar la captura de la camara');
+      return;
+    }
+
+    context.drawImage(cameraVideoRef.current, 0, 0, videoWidth, videoHeight);
+    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+    setForm((current) => ({
+      ...current,
+      photo_url: photoDataUrl
+    }));
+    setMessage('Foto capturada correctamente.');
+    stopCamera();
   }
 
   function clearPhoto() {
@@ -368,6 +555,7 @@ export function ClientsPage() {
   }
 
   function resetForm() {
+    stopCamera();
     setEditingClientId(null);
     setForm(initialClientForm);
     setQrCodeDataUrl('');
@@ -375,6 +563,7 @@ export function ClientsPage() {
   }
 
   function startEdit(client) {
+    stopCamera();
     setEditingClientId(client.id);
     setForm({
       client_code: client.client_code || '',
@@ -420,6 +609,7 @@ export function ClientsPage() {
       setEditingClientId(null);
       setForm(initialClientForm);
       setQrCodeDataUrl('');
+      stopCamera();
       await loadClients();
       setActiveView('list');
     } catch (requestError) {
@@ -650,22 +840,86 @@ export function ClientsPage() {
 
             <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Foto del cliente</span>
-              <input
-                accept="image/png,image/jpeg,image/webp"
-                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                onChange={handlePhotoChange}
-                type="file"
-              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-2xl border border-brand-sand px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                  disabled={startingCamera}
+                  onClick={handleTakePhoto}
+                  type="button"
+                >
+                  {startingCamera ? 'Abriendo camara...' : isCameraOpen ? 'Reiniciar camara' : 'Camara'}
+                </button>
+              </div>
+
+              {isCameraOpen ? (
+                <div className="fixed inset-0 z-50 bg-black">
+                  <div className="relative h-full w-full">
+                    <video
+                      autoPlay
+                      className="h-full w-full object-cover"
+                      muted
+                      playsInline
+                      ref={cameraVideoRef}
+                    />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/45" />
+
+                    <div className="absolute left-4 right-4 top-4 flex items-center justify-between">
+                      <button
+                        className="rounded-full border border-white/60 bg-black/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white"
+                        onClick={stopCamera}
+                        type="button"
+                      >
+                        Cerrar
+                      </button>
+                      <button
+                        className="rounded-full border border-white/60 bg-black/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-50"
+                        disabled={startingCamera}
+                        onClick={handleSwitchCamera}
+                        type="button"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="h-72 w-52 rounded-3xl border-2 border-white/90 shadow-[0_0_0_999px_rgba(0,0,0,0.2)]" />
+                    </div>
+
+                    <div className="absolute bottom-8 left-0 right-0 flex items-center justify-center">
+                      <button
+                        className="h-20 w-20 rounded-full border-4 border-white bg-white/20"
+                        onClick={handleCaptureFromCamera}
+                        type="button"
+                      >
+                        <span className="sr-only">Capturar foto</span>
+                      </button>
+                    </div>
+
+                    <p className="absolute bottom-32 left-0 right-0 text-center text-xs font-semibold uppercase tracking-[0.14em] text-white/90">
+                      Centra al cliente y captura
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              {!isCameraOpen ? (
+                <>
+                  <p className="text-xs text-brand-forest/70">Tambien puedes cargar una imagen desde el dispositivo.</p>
+                  <input
+                    accept="image/png,image/jpeg,image/webp"
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    onChange={handlePhotoChange}
+                    type="file"
+                  />
+                </>
+              ) : null}
+
               {form.photo_url ? (
                 <div className="space-y-3">
                   <img
                     alt="Vista previa de cliente"
                     className="h-44 w-full cursor-pointer rounded-[1.5rem] object-cover"
-                    onClick={() => {
-                      const blob = dataURLToBlob(form.photo_url);
-                      const url = URL.createObjectURL(blob);
-                      window.open(url);
-                    }}
+                    onClick={() => openPhotoViewer(form.photo_url, 'Foto ampliada del cliente')}
                     src={form.photo_url}
                   />
                   <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={clearPhoto} type="button">
@@ -741,7 +995,13 @@ export function ClientsPage() {
                         {client.photo_url ? (
                           <img
                             alt={`${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente'}
-                            className="h-10 w-10 rounded-full border border-brand-sand/70 object-cover"
+                            className="h-10 w-10 cursor-pointer rounded-full border border-brand-sand/70 object-cover"
+                            onClick={() =>
+                              openPhotoViewer(
+                                client.photo_url,
+                                `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Foto de cliente'
+                              )
+                            }
                             src={client.photo_url}
                           />
                         ) : (
@@ -781,6 +1041,29 @@ export function ClientsPage() {
           <Pagination currentPage={pagination.page} itemLabel="clientes" onPageChange={setCurrentPage} pageSize={pagination.limit} totalItems={pagination.totalItems} totalPages={pagination.totalPages} />
         </DataPanel>
       )}
+
+      {photoViewerSrc ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+          onClick={closePhotoViewer}
+          role="presentation"
+        >
+          <div className="relative max-h-[90vh] w-full max-w-5xl" onClick={(event) => event.stopPropagation()} role="presentation">
+            <button
+              className="absolute right-3 top-3 z-10 rounded-full bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-[0.12em] text-white"
+              onClick={closePhotoViewer}
+              type="button"
+            >
+              Cerrar
+            </button>
+            <img
+              alt={photoViewerAlt}
+              className="max-h-[90vh] w-full rounded-2xl object-contain"
+              src={photoViewerSrc}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

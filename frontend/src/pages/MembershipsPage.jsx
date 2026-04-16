@@ -77,6 +77,22 @@ export function MembershipsPage() {
   const [planSaving, setPlanSaving] = useState(false);
   const [membershipSaving, setMembershipSaving] = useState(false);
   const [membershipExporting, setMembershipExporting] = useState(false);
+  const [photoViewerSrc, setPhotoViewerSrc] = useState('');
+  const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
+
+  function openPhotoViewer(src, alt = 'Foto de cliente') {
+    if (!src) {
+      return;
+    }
+
+    setPhotoViewerSrc(src);
+    setPhotoViewerAlt(alt);
+  }
+
+  function closePhotoViewer() {
+    setPhotoViewerSrc('');
+    setPhotoViewerAlt('Foto de cliente');
+  }
 
   async function loadFormOptions() {
     setError('');
@@ -240,6 +256,11 @@ export function MembershipsPage() {
       client_id: String(client.id)
     }));
     setClientSearch(`${client.client_code} - ${client.first_name} ${client.last_name}`);
+  }
+
+  function getClientPhotoById(clientId) {
+    const client = clients.find((item) => String(item.id) === String(clientId));
+    return client?.photo_url || null;
   }
 
   function resetPlanForm() {
@@ -547,7 +568,27 @@ export function MembershipsPage() {
                         onClick={() => selectClient(client)}
                         type="button"
                       >
-                        <span className="font-semibold">{client.client_code} - {client.first_name} {client.last_name}</span>
+                        <span className="flex items-center gap-3">
+                          {client.photo_url ? (
+                            <img
+                              alt={`${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente'}
+                              className="h-10 w-10 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openPhotoViewer(
+                                  client.photo_url,
+                                  `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Foto de cliente'
+                                );
+                              }}
+                              src={client.photo_url}
+                            />
+                          ) : (
+                            <span className="flex h-10 w-10 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-xs font-semibold uppercase text-brand-forest">
+                              {`${client.first_name?.[0] || ''}${client.last_name?.[0] || ''}` || '--'}
+                            </span>
+                          )}
+                          <span className="font-semibold">{client.client_code} - {client.first_name} {client.last_name}</span>
+                        </span>
                         {client.phone_number ? <span className="block text-xs text-brand-forest/70">{client.phone_number}</span> : null}
                       </button>
                     ))}
@@ -564,6 +605,30 @@ export function MembershipsPage() {
                     value={clients.find((client) => String(client.id) === String(membershipForm.client_id)) ? `${clients.find((client) => String(client.id) === String(membershipForm.client_id)).client_code} - ${clients.find((client) => String(client.id) === String(membershipForm.client_id)).first_name} ${clients.find((client) => String(client.id) === String(membershipForm.client_id)).last_name}` : ''}
                   />
                 )}
+
+                {membershipForm.client_id && clients.find((client) => String(client.id) === String(membershipForm.client_id))?.photo_url ? (
+                  <button
+                    className="mt-2 w-fit"
+                    onClick={() => {
+                      const selectedClient = clients.find((client) => String(client.id) === String(membershipForm.client_id));
+                      if (!selectedClient?.photo_url) {
+                        return;
+                      }
+
+                      openPhotoViewer(
+                        selectedClient.photo_url,
+                        `${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Foto de cliente'
+                      );
+                    }}
+                    type="button"
+                  >
+                    <img
+                      alt="Foto del cliente seleccionado"
+                      className="h-16 w-16 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                      src={clients.find((client) => String(client.id) === String(membershipForm.client_id)).photo_url}
+                    />
+                  </button>
+                ) : null}
               </label>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Plan</span>
@@ -680,13 +745,32 @@ export function MembershipsPage() {
               {memberships.map((membership) => (
                 <div key={membership.id} className="rounded-2xl border border-brand-sand/70 px-4 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <p className="font-semibold text-brand-forest">
-                        {membership.client_first_name} {membership.client_last_name}
-                      </p>
-                      <p className="mt-1 text-sm text-brand-forest/70">
-                        {membership.plan_name} · {membership.membership_number}
-                      </p>
+                    <div className="flex items-start gap-3">
+                      {getClientPhotoById(membership.client_id) ? (
+                        <img
+                          alt={`${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || 'Cliente'}
+                          className="h-12 w-12 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                          onClick={() =>
+                            openPhotoViewer(
+                              getClientPhotoById(membership.client_id),
+                              `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || 'Foto de cliente'
+                            )
+                          }
+                          src={getClientPhotoById(membership.client_id)}
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-xs font-semibold uppercase text-brand-forest">
+                          {`${membership.client_first_name?.[0] || ''}${membership.client_last_name?.[0] || ''}` || '--'}
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-semibold text-brand-forest">
+                          {membership.client_first_name} {membership.client_last_name}
+                        </p>
+                        <p className="mt-1 text-sm text-brand-forest/70">
+                          {membership.plan_name} · {membership.membership_number}
+                        </p>
+                      </div>
                     </div>
                     <StatusBadge value={membership.status} />
                   </div>
@@ -718,6 +802,29 @@ export function MembershipsPage() {
           ) : null}
           <Pagination currentPage={membershipPagination.page} itemLabel="membresias" onPageChange={setMembershipPage} pageSize={membershipPagination.limit} totalItems={membershipPagination.totalItems} totalPages={membershipPagination.totalPages} />
         </DataPanel>
+      ) : null}
+
+      {photoViewerSrc ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+          onClick={closePhotoViewer}
+          role="presentation"
+        >
+          <div className="relative max-h-[90vh] w-full max-w-5xl" onClick={(event) => event.stopPropagation()} role="presentation">
+            <button
+              className="absolute right-3 top-3 z-10 rounded-full bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-[0.12em] text-white"
+              onClick={closePhotoViewer}
+              type="button"
+            >
+              Cerrar
+            </button>
+            <img
+              alt={photoViewerAlt}
+              className="max-h-[90vh] w-full rounded-2xl object-contain"
+              src={photoViewerSrc}
+            />
+          </div>
+        </div>
       ) : null}
     </div>
   );

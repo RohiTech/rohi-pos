@@ -80,6 +80,8 @@ export function AttendancePage() {
   const [cameraError, setCameraError] = useState('');
   const [scanInfo, setScanInfo] = useState('');
   const [lastQrValue, setLastQrValue] = useState('');
+  const [photoViewerSrc, setPhotoViewerSrc] = useState('');
+  const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const scannerRef = useRef(null);
@@ -424,6 +426,20 @@ export function AttendancePage() {
     }
   }
 
+  function openPhotoViewer(src, alt = 'Foto de cliente') {
+    if (!src) {
+      return;
+    }
+
+    setPhotoViewerSrc(src);
+    setPhotoViewerAlt(alt);
+  }
+
+  function closePhotoViewer() {
+    setPhotoViewerSrc('');
+    setPhotoViewerAlt('Foto de cliente');
+  }
+
   return (
     <div>
       {message ? <p className="mb-4 text-sm text-emerald-700">{message}</p> : null}
@@ -492,7 +508,14 @@ export function AttendancePage() {
                         {client.photo_url ? (
                           <img
                             alt={`${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Cliente'}
-                            className="h-12 w-12 rounded-full border border-brand-sand/70 object-cover"
+                            className="h-12 w-12 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openPhotoViewer(
+                                client.photo_url,
+                                `${client.first_name || ''} ${client.last_name || ''}`.trim() || 'Foto de cliente'
+                              );
+                            }}
                             src={client.photo_url}
                           />
                         ) : (
@@ -586,7 +609,13 @@ export function AttendancePage() {
                 {selectedClient.photo_url ? (
                   <img
                     alt={`${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Cliente'}
-                    className="h-14 w-14 rounded-full border border-brand-sand/70 object-cover"
+                    className="h-14 w-14 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                    onClick={() =>
+                      openPhotoViewer(
+                        selectedClient.photo_url,
+                        `${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Foto de cliente'
+                      )
+                    }
                     src={selectedClient.photo_url}
                   />
                 ) : (
@@ -715,6 +744,29 @@ export function AttendancePage() {
           </form>
         </DataPanel>
       </section>
+
+      {photoViewerSrc ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+          onClick={closePhotoViewer}
+          role="presentation"
+        >
+          <div className="relative max-h-[90vh] w-full max-w-5xl" onClick={(event) => event.stopPropagation()} role="presentation">
+            <button
+              className="absolute right-3 top-3 z-10 rounded-full bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-[0.12em] text-white"
+              onClick={closePhotoViewer}
+              type="button"
+            >
+              Cerrar
+            </button>
+            <img
+              alt={photoViewerAlt}
+              className="max-h-[90vh] w-full rounded-2xl object-contain"
+              src={photoViewerSrc}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
