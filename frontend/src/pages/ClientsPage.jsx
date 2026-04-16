@@ -61,9 +61,11 @@ export function ClientsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [cardLoading, setCardLoading] = useState(false);
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [qrGenerating, setQrGenerating] = useState(false);
   const [editingClientId, setEditingClientId] = useState(null);
@@ -72,6 +74,7 @@ export function ClientsPage() {
   async function loadClients() {
     setLoading(true);
     setError('');
+    setMessage('');
 
     try {
       const query = buildQueryString({
@@ -126,6 +129,7 @@ export function ClientsPage() {
 
     setQrGenerating(true);
     setError('');
+    setMessage('');
 
     try {
       const qrDataUrl = await QRCode.toDataURL(normalizedCode, {
@@ -157,6 +161,105 @@ export function ClientsPage() {
     anchor.click();
   }
 
+  function normalizeWhatsappPhone(rawPhone) {
+    const cleaned = String(rawPhone || '').replace(/[^\d+]/g, '').trim();
+
+    if (!cleaned) {
+      return '';
+    }
+
+    let digits = cleaned.startsWith('+') ? cleaned.slice(1) : cleaned;
+
+    if (digits.startsWith('00')) {
+      digits = digits.slice(2);
+    }
+
+    if (/^\d{8}$/.test(digits)) {
+      return `505${digits}`;
+    }
+
+    return digits;
+  }
+
+  async function ensureQrCodeDataUrl(clientCode) {
+    const normalizedCode = String(clientCode || '').trim();
+
+    if (!normalizedCode) {
+      throw new Error('Ingresa el codigo del cliente antes de enviar por WhatsApp');
+    }
+
+    if (qrCodeDataUrl) {
+      return qrCodeDataUrl;
+    }
+
+    const generatedQrDataUrl = await QRCode.toDataURL(normalizedCode, {
+      width: 360,
+      margin: 2,
+      errorCorrectionLevel: 'M'
+    });
+    setQrCodeDataUrl(generatedQrDataUrl);
+    return generatedQrDataUrl;
+  }
+
+  async function handleSendWhatsappQr() {
+    setError('');
+    setMessage('');
+
+    const normalizedPhone = normalizeWhatsappPhone(form.phone);
+
+    if (!normalizedPhone || normalizedPhone.length < 8) {
+      setError('Registra un numero de telefono valido para enviar por WhatsApp');
+      return;
+    }
+
+    setSendingWhatsapp(true);
+
+    try {
+      const qrDataUrl = await ensureQrCodeDataUrl(form.client_code);
+      const qrBlob = dataURLToBlob(qrDataUrl);
+      const clientCode = String(form.client_code || '').trim();
+      const clientName = `${form.first_name || ''} ${form.last_name || ''}`.trim() || 'cliente';
+      const fileNameCode = clientCode.replace(/[^a-zA-Z0-9_-]/g, '_') || 'cliente';
+      const qrFile = new File([qrBlob], `qr_cliente_${fileNameCode}.png`, { type: 'image/png' });
+      const whatsappMessage = [
+        `Hola ${clientName},`,
+        `te compartimos tu codigo QR de acceso (${clientCode}).`,
+        'Presentalo en recepcion para marcar asistencia.'
+      ].join(' ');
+
+      const canShareImage =
+        typeof navigator !== 'undefined' &&
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [qrFile] });
+
+      if (canShareImage) {
+        await navigator.share({
+          title: 'Codigo QR RohiPOS',
+          text: whatsappMessage,
+          files: [qrFile]
+        });
+        setMessage('QR listo para enviar por WhatsApp. Selecciona el contacto del cliente.');
+        return;
+      }
+
+      const anchor = document.createElement('a');
+      anchor.href = qrDataUrl;
+      anchor.download = `qr_cliente_${fileNameCode}.png`;
+      anchor.click();
+
+      const whatsappUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(
+        `${whatsappMessage} Te adjuntamos la imagen del QR descargada.`
+      )}`;
+      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      setMessage('Se abrio WhatsApp y se descargo el QR para adjuntarlo como imagen.');
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible preparar el envio por WhatsApp');
+    } finally {
+      setSendingWhatsapp(false);
+    }
+  }
+
   async function openMembershipCardPdf() {
     if (!editingClientId) {
       setError('Guarda el cliente antes de generar el carnet de membresia');
@@ -174,6 +277,7 @@ export function ClientsPage() {
 
     setCardLoading(true);
     setError('');
+    setMessage('');
 
     try {
       const response = await fetch(
@@ -277,6 +381,7 @@ export function ClientsPage() {
     event.preventDefault();
     setSaving(true);
     setError('');
+    setMessage('');
 
     try {
       const payload = {
@@ -309,6 +414,7 @@ export function ClientsPage() {
 
   async function toggleActive(client) {
     setError('');
+    setMessage('');
 
     try {
       await apiPut(`/clients/${client.id}`, { is_active: !client.is_active });
@@ -345,6 +451,7 @@ export function ClientsPage() {
 
   async function handleExportExcel() {
     setError('');
+    setMessage('');
     setExporting(true);
 
     try {
@@ -402,6 +509,7 @@ export function ClientsPage() {
         description="El modulo se divide en ventanas separadas para listado y formulario."
       />
 
+      {message ? <p className="mb-4 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
 
       <div className="mb-6 flex flex-wrap gap-3">
@@ -449,7 +557,18 @@ export function ClientsPage() {
                       Descargar QR
                     </button>
                   ) : null}
+                  <button
+                    className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                    disabled={sendingWhatsapp || !String(form.client_code || '').trim() || !String(form.phone || '').trim()}
+                    onClick={handleSendWhatsappQr}
+                    type="button"
+                  >
+                    {sendingWhatsapp ? 'Enviando...' : 'Enviar WhatsApp'}
+                  </button>
                 </div>
+                <p className="text-xs text-brand-forest/70">
+                  Requiere telefono del cliente. En tablet/movil comparte la imagen directo; en desktop abre WhatsApp y descarga el QR.
+                </p>
               </label>
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Fecha de ingreso</span>

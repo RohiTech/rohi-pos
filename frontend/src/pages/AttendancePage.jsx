@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
-import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
@@ -79,11 +78,33 @@ export function AttendancePage() {
   const [scannerEnabled, setScannerEnabled] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
   const [cameraError, setCameraError] = useState('');
+  const [scanInfo, setScanInfo] = useState('');
+  const [lastQrValue, setLastQrValue] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const scannerRef = useRef(null);
   const scanLockRef = useRef(false);
   const lastScanRef = useRef({ value: '', timestamp: 0 });
+  const userIdRef = useRef(null);
+  const formRef = useRef(initialForm);
+  const submittedSearchRef = useRef('');
+  const clientPageRef = useRef(1);
+
+  useEffect(() => {
+    userIdRef.current = user?.id || null;
+  }, [user]);
+
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
+
+  useEffect(() => {
+    submittedSearchRef.current = submittedSearch;
+  }, [submittedSearch]);
+
+  useEffect(() => {
+    clientPageRef.current = clientPage;
+  }, [clientPage]);
 
   async function stopScanner() {
     const scanner = scannerRef.current;
@@ -239,16 +260,24 @@ export function AttendancePage() {
   }
 
   async function registerAttendance(client, payloadOverrides = {}) {
+    const checkedInByUserId = userIdRef.current;
+
+    if (!checkedInByUserId) {
+      throw new Error('No se detecto la sesion del usuario. Recarga la pagina e intenta de nuevo.');
+    }
+
+    const currentForm = formRef.current;
+
     const payload = {
       client_id: Number(client.id),
-      checked_in_by_user_id: user.id,
-      access_type: payloadOverrides.access_type || form.access_type,
-      payment_method: payloadOverrides.payment_method || form.payment_method,
+      checked_in_by_user_id: checkedInByUserId,
+      access_type: payloadOverrides.access_type || currentForm.access_type,
+      payment_method: payloadOverrides.payment_method || currentForm.payment_method,
       daily_pass_amount:
-        (payloadOverrides.access_type || form.access_type) === 'daily_pass'
-          ? Number((payloadOverrides.daily_pass_amount ?? form.daily_pass_amount) || 0)
+        (payloadOverrides.access_type || currentForm.access_type) === 'daily_pass'
+          ? Number((payloadOverrides.daily_pass_amount ?? currentForm.daily_pass_amount) || 0)
           : undefined,
-      notes: (payloadOverrides.notes ?? form.notes) || null
+      notes: (payloadOverrides.notes ?? currentForm.notes) || null
     };
 
     const response = await apiPost('/attendance/checkins', payload);
@@ -256,10 +285,11 @@ export function AttendancePage() {
     setMessage(`Asistencia procesada correctamente.${warning}`);
     setForm(initialForm);
     setSelectedClient(null);
-    await loadDashboard(submittedSearch, clientPage);
+    await loadDashboard(submittedSearchRef.current, clientPageRef.current);
   }
 
   async function handleQrScan(decodedText) {
+    const parsedValue = parseQrPayload(decodedText);
     const now = Date.now();
     const lastScan = lastScanRef.current;
 
@@ -267,18 +297,20 @@ export function AttendancePage() {
       return;
     }
 
-    if (lastScan.value === decodedText && now - lastScan.timestamp < SCAN_COOLDOWN_MS) {
+    if (lastScan.value === parsedValue && now - lastScan.timestamp < SCAN_COOLDOWN_MS) {
       return;
     }
 
     scanLockRef.current = true;
     lastScanRef.current = {
-      value: decodedText,
+      value: parsedValue,
       timestamp: now
     };
+    setLastQrValue(parsedValue || decodedText || '');
 
     setError('');
     setMessage('');
+    setScanInfo('QR detectado. Procesando...');
 
     try {
       const client = await resolveClientFromQr(decodedText);
@@ -287,8 +319,11 @@ export function AttendancePage() {
         access_type: 'membership',
         notes: 'Check-in por escaneo QR'
       });
+      setScanInfo(`Ingreso registrado para ${client.first_name} ${client.last_name}.`);
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible procesar el QR');
+      const errorMessage = requestError.message || 'No fue posible procesar el QR';
+      setError(errorMessage);
+      setScanInfo(errorMessage);
     } finally {
       scanLockRef.current = false;
     }
@@ -298,6 +333,8 @@ export function AttendancePage() {
     if (!scannerEnabled) {
       setScannerReady(false);
       setCameraError('');
+      setScanInfo('');
+      setLastQrValue('');
       stopScanner();
       return;
     }
@@ -317,22 +354,34 @@ export function AttendancePage() {
 
         const scanner = new Html5Qrcode(scannerElementId);
         scannerRef.current = scanner;
+        const scannerConfig = {
+          fps: 10,
+          qrbox: {
+            width: 240,
+            height: 240
+          },
+          aspectRatio: 1
+        };
+        const onSuccess = (decodedText) => {
+          handleQrScan(decodedText);
+        };
 
-        await scanner.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: {
-              width: 220,
-              height: 220
-            },
-            aspectRatio: 1
-          },
-          (decodedText) => {
-            handleQrScan(decodedText);
-          },
-          () => {}
-        );
+        try {
+          await scanner.start(
+            { facingMode: 'environment' },
+            scannerConfig,
+            onSuccess,
+            () => {}
+          );
+        } catch (_cameraByFacingModeError) {
+          const cameras = await Html5Qrcode.getCameras();
+
+          if (!cameras?.length) {
+            throw new Error('No se detectaron camaras disponibles');
+          }
+
+          await scanner.start(cameras[0].id, scannerConfig, onSuccess, () => {});
+        }
 
         if (isCancelled) {
           await stopScanner();
@@ -377,12 +426,6 @@ export function AttendancePage() {
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Asistencia"
-        title="Control de ingreso del gimnasio"
-        description="Valida membresias vigentes, cobra accesos diarios y deja trazabilidad de cada entrada."
-      />
-
       {message ? <p className="mb-4 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
 
@@ -445,6 +488,16 @@ export function AttendancePage() {
                       ? 'Camara activa. Apunta al QR del carnet para registrar asistencia.'
                       : 'Iniciando camara...'}
                   </p>
+                  {lastQrValue ? (
+                    <p className="mt-1 text-xs text-brand-forest/70">
+                      Ultimo QR detectado: {lastQrValue}
+                    </p>
+                  ) : null}
+                  {scanInfo ? (
+                    <p className="mt-2 rounded-xl bg-brand-cream/60 px-3 py-2 text-xs font-semibold text-brand-forest">
+                      {scanInfo}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
