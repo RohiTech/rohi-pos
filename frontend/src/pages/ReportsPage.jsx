@@ -36,6 +36,10 @@ function getTodayDateString() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function getCurrentMonthString() {
+  return new Date().toISOString().slice(0, 7);
+}
+
 export function ReportsPage() {
   const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
@@ -45,6 +49,14 @@ export function ReportsPage() {
   const [openNewClientsModal, setOpenNewClientsModal] = useState(false);
   const [openInactiveClientsModal, setOpenInactiveClientsModal] = useState(false);
   const [openMembershipsByClientModal, setOpenMembershipsByClientModal] = useState(false);
+  const [openActiveMembershipsModal, setOpenActiveMembershipsModal] = useState(false);
+  const [openMembershipsByPlanModal, setOpenMembershipsByPlanModal] = useState(false);
+  const [openUpcomingRenewalsModal, setOpenUpcomingRenewalsModal] = useState(false);
+  const [openRecurringIncomeModal, setOpenRecurringIncomeModal] = useState(false);
+  const [openInventoryCurrentModal, setOpenInventoryCurrentModal] = useState(false);
+  const [openLowStockModal, setOpenLowStockModal] = useState(false);
+  const [openInventoryMovementsModal, setOpenInventoryMovementsModal] = useState(false);
+  const [openProductKardexModal, setOpenProductKardexModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: getTodayDateString(),
     fechaFin: getTodayDateString(),
@@ -104,7 +116,59 @@ export function ReportsPage() {
     planId: '',
     onlyActiveClients: false
   });
+  const [activeMembershipsParams, setActiveMembershipsParams] = useState({
+    asOfDate: getTodayDateString(),
+    planId: '',
+    search: '',
+    withBalanceOnly: false,
+    includePending: false
+  });
+  const [membershipsByPlanParams, setMembershipsByPlanParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    status: '',
+    planId: ''
+  });
+  const [upcomingRenewalsParams, setUpcomingRenewalsParams] = useState({
+    asOfDate: getTodayDateString(),
+    daysAhead: '7',
+    planId: '',
+    search: '',
+    onlyActiveClients: true
+  });
+  const [recurringIncomeParams, setRecurringIncomeParams] = useState({
+    month: getCurrentMonthString(),
+    status: '',
+    planId: '',
+    onlyPaid: false
+  });
+  const [inventoryCurrentParams, setInventoryCurrentParams] = useState({
+    categoryId: '',
+    search: '',
+    includeInactive: false,
+    includeZeroStock: false
+  });
+  const [lowStockParams, setLowStockParams] = useState({
+    categoryId: '',
+    search: '',
+    includeInactive: false,
+    includeZeroMinimum: false
+  });
+  const [inventoryMovementsParams, setInventoryMovementsParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    movementType: '',
+    categoryId: '',
+    productId: '',
+    search: ''
+  });
+  const [productKardexParams, setProductKardexParams] = useState({
+    productId: '',
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString()
+  });
   const [membershipPlans, setMembershipPlans] = useState([]);
+  const [inventoryProducts, setInventoryProducts] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -234,7 +298,13 @@ export function ReportsPage() {
   useEffect(() => {
     let isMounted = true;
 
-    if (!openMembershipsByClientModal) {
+    if (!(
+      openMembershipsByClientModal
+      || openActiveMembershipsModal
+      || openMembershipsByPlanModal
+      || openUpcomingRenewalsModal
+      || openRecurringIncomeModal
+    )) {
       return () => {
         isMounted = false;
       };
@@ -255,7 +325,39 @@ export function ReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [openMembershipsByClientModal]);
+  }, [
+    openMembershipsByClientModal,
+    openActiveMembershipsModal,
+    openMembershipsByPlanModal,
+    openUpcomingRenewalsModal,
+    openRecurringIncomeModal
+  ]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!(openInventoryMovementsModal || openProductKardexModal)) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    apiGet('/products?active=true&limit=100')
+      .then((response) => {
+        if (isMounted) {
+          setInventoryProducts(response.data || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setInventoryProducts([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [openInventoryMovementsModal, openProductKardexModal]);
 
   const handleOpenDailySales = () => setOpenDailySalesModal(true);
   const handleCloseDailySales = () => setOpenDailySalesModal(false);
@@ -277,6 +379,22 @@ export function ReportsPage() {
   const handleCloseInactiveClients = () => setOpenInactiveClientsModal(false);
   const handleOpenMembershipsByClient = () => setOpenMembershipsByClientModal(true);
   const handleCloseMembershipsByClient = () => setOpenMembershipsByClientModal(false);
+  const handleOpenActiveMemberships = () => setOpenActiveMembershipsModal(true);
+  const handleCloseActiveMemberships = () => setOpenActiveMembershipsModal(false);
+  const handleOpenMembershipsByPlan = () => setOpenMembershipsByPlanModal(true);
+  const handleCloseMembershipsByPlan = () => setOpenMembershipsByPlanModal(false);
+  const handleOpenUpcomingRenewals = () => setOpenUpcomingRenewalsModal(true);
+  const handleCloseUpcomingRenewals = () => setOpenUpcomingRenewalsModal(false);
+  const handleOpenRecurringIncome = () => setOpenRecurringIncomeModal(true);
+  const handleCloseRecurringIncome = () => setOpenRecurringIncomeModal(false);
+  const handleOpenInventoryCurrent = () => setOpenInventoryCurrentModal(true);
+  const handleCloseInventoryCurrent = () => setOpenInventoryCurrentModal(false);
+  const handleOpenLowStock = () => setOpenLowStockModal(true);
+  const handleCloseLowStock = () => setOpenLowStockModal(false);
+  const handleOpenInventoryMovements = () => setOpenInventoryMovementsModal(true);
+  const handleCloseInventoryMovements = () => setOpenInventoryMovementsModal(false);
+  const handleOpenProductKardex = () => setOpenProductKardexModal(true);
+  const handleCloseProductKardex = () => setOpenProductKardexModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -337,6 +455,67 @@ export function ReportsPage() {
     setMembershipsByClientParams((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleActiveMembershipsParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setActiveMembershipsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleMembershipsByPlanParamsChange = (e) => {
+    const { name, value } = e.target;
+    setMembershipsByPlanParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleUpcomingRenewalsParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setUpcomingRenewalsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleRecurringIncomeParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setRecurringIncomeParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleInventoryCurrentParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setInventoryCurrentParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleLowStockParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setLowStockParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleInventoryMovementsParamsChange = (e) => {
+    const { name, value } = e.target;
+    setInventoryMovementsParams((prev) => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleProductKardexParamsChange = (e) => {
+    const { name, value } = e.target;
+    setProductKardexParams((prev) => ({
+      ...prev,
+      [name]: value
     }));
   };
 
@@ -625,6 +804,281 @@ export function ReportsPage() {
     setOpenMembershipsByClientModal(false);
   };
 
+  const handleActiveMembershipsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      as_of_date: activeMembershipsParams.asOfDate,
+      plan_id: activeMembershipsParams.planId,
+      search: activeMembershipsParams.search.trim(),
+      with_balance_only: activeMembershipsParams.withBalanceOnly,
+      include_pending: activeMembershipsParams.includePending
+    });
+
+    fetch(`http://localhost:3001/api/reports/active-memberships/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'membresias_vigentes.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenActiveMembershipsModal(false);
+  };
+
+  const handleMembershipsByPlanReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: membershipsByPlanParams.fechaInicio,
+      fechaFin: membershipsByPlanParams.fechaFin,
+      status: membershipsByPlanParams.status,
+      plan_id: membershipsByPlanParams.planId
+    });
+
+    fetch(`http://localhost:3001/api/reports/memberships-by-plan/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'membresias_por_plan.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenMembershipsByPlanModal(false);
+  };
+
+  const handleUpcomingRenewalsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      as_of_date: upcomingRenewalsParams.asOfDate,
+      days_ahead: upcomingRenewalsParams.daysAhead,
+      plan_id: upcomingRenewalsParams.planId,
+      search: upcomingRenewalsParams.search.trim(),
+      only_active_clients: upcomingRenewalsParams.onlyActiveClients
+    });
+
+    fetch(`http://localhost:3001/api/reports/upcoming-renewals/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'renovaciones_proximas.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenUpcomingRenewalsModal(false);
+  };
+
+  const handleRecurringIncomeReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      month: recurringIncomeParams.month,
+      status: recurringIncomeParams.status,
+      plan_id: recurringIncomeParams.planId,
+      only_paid: recurringIncomeParams.onlyPaid
+    });
+
+    fetch(`http://localhost:3001/api/reports/recurring-income/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ingresos_recurrentes.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenRecurringIncomeModal(false);
+  };
+
+  const handleInventoryCurrentReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      category_id: inventoryCurrentParams.categoryId,
+      search: inventoryCurrentParams.search.trim(),
+      include_inactive: inventoryCurrentParams.includeInactive,
+      include_zero_stock: inventoryCurrentParams.includeZeroStock
+    });
+
+    fetch(`http://localhost:3001/api/reports/inventory-current/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'inventario_actual.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenInventoryCurrentModal(false);
+  };
+
+  const handleLowStockReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      category_id: lowStockParams.categoryId,
+      search: lowStockParams.search.trim(),
+      include_inactive: lowStockParams.includeInactive,
+      include_zero_minimum: lowStockParams.includeZeroMinimum
+    });
+
+    fetch(`http://localhost:3001/api/reports/low-stock-products/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'productos_bajos_stock.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenLowStockModal(false);
+  };
+
+  const handleInventoryMovementsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: inventoryMovementsParams.fechaInicio,
+      fechaFin: inventoryMovementsParams.fechaFin,
+      movement_type: inventoryMovementsParams.movementType,
+      category_id: inventoryMovementsParams.categoryId,
+      product_id: inventoryMovementsParams.productId,
+      search: inventoryMovementsParams.search.trim()
+    });
+
+    fetch(`http://localhost:3001/api/reports/inventory-movements/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'movimientos_inventario.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenInventoryMovementsModal(false);
+  };
+
+  const handleProductKardexReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      product_id: productKardexParams.productId,
+      fechaInicio: productKardexParams.fechaInicio,
+      fechaFin: productKardexParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/product-kardex/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `kardex_producto_${productKardexParams.productId || '0'}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenProductKardexModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -692,6 +1146,62 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenMembershipsByClient}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Membresías vigentes' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenActiveMemberships}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Membresías por plan' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenMembershipsByPlan}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Renovaciones próximas' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenUpcomingRenewals}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ingresos recurrentes' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenRecurringIncome}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Inventario actual' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenInventoryCurrent}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Productos bajos en stock' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenLowStock}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Movimientos de inventario' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenInventoryMovements}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Kardex de producto' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenProductKardex}
                     >
                       {report}
                     </button>
@@ -1194,6 +1704,580 @@ export function ReportsPage() {
             <button
               type="button"
               onClick={handleCloseInactiveClients}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openActiveMembershipsModal} onClose={handleCloseActiveMemberships}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías vigentes</h2>
+        <form onSubmit={handleActiveMembershipsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha de corte</span>
+            <input
+              type="date"
+              name="asOfDate"
+              value={activeMembershipsParams.asOfDate}
+              onChange={handleActiveMembershipsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={activeMembershipsParams.planId}
+              onChange={handleActiveMembershipsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={activeMembershipsParams.search}
+              onChange={handleActiveMembershipsParamsChange}
+              placeholder="Código, nombre o número de membresía"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="withBalanceOnly"
+              checked={activeMembershipsParams.withBalanceOnly}
+              onChange={handleActiveMembershipsParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo membresías con saldo pendiente</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="includePending"
+              checked={activeMembershipsParams.includePending}
+              onChange={handleActiveMembershipsParamsChange}
+            />
+            <span className="text-sm font-semibold">Incluir membresías pendientes</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseActiveMemberships}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openMembershipsByPlanModal} onClose={handleCloseMembershipsByPlan}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías por plan</h2>
+        <form onSubmit={handleMembershipsByPlanReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={membershipsByPlanParams.fechaInicio}
+              onChange={handleMembershipsByPlanParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={membershipsByPlanParams.fechaFin}
+              onChange={handleMembershipsByPlanParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="status"
+              value={membershipsByPlanParams.status}
+              onChange={handleMembershipsByPlanParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="active">Activa</option>
+              <option value="pending">Pendiente</option>
+              <option value="expired">Expirada</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={membershipsByPlanParams.planId}
+              onChange={handleMembershipsByPlanParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseMembershipsByPlan}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openUpcomingRenewalsModal} onClose={handleCloseUpcomingRenewals}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de renovaciones próximas</h2>
+        <form onSubmit={handleUpcomingRenewalsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha de corte</span>
+            <input
+              type="date"
+              name="asOfDate"
+              value={upcomingRenewalsParams.asOfDate}
+              onChange={handleUpcomingRenewalsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Días hacia adelante</span>
+            <input
+              type="number"
+              min="1"
+              max="90"
+              name="daysAhead"
+              value={upcomingRenewalsParams.daysAhead}
+              onChange={handleUpcomingRenewalsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={upcomingRenewalsParams.planId}
+              onChange={handleUpcomingRenewalsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={upcomingRenewalsParams.search}
+              onChange={handleUpcomingRenewalsParamsChange}
+              placeholder="Código, nombre o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyActiveClients"
+              checked={upcomingRenewalsParams.onlyActiveClients}
+              onChange={handleUpcomingRenewalsParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes activos</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseUpcomingRenewals}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openRecurringIncomeModal} onClose={handleCloseRecurringIncome}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ingresos recurrentes</h2>
+        <form onSubmit={handleRecurringIncomeReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Mes</span>
+            <input
+              type="month"
+              name="month"
+              value={recurringIncomeParams.month}
+              onChange={handleRecurringIncomeParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="status"
+              value={recurringIncomeParams.status}
+              onChange={handleRecurringIncomeParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="active">Activa</option>
+              <option value="pending">Pendiente</option>
+              <option value="expired">Expirada</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={recurringIncomeParams.planId}
+              onChange={handleRecurringIncomeParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyPaid"
+              checked={recurringIncomeParams.onlyPaid}
+              onChange={handleRecurringIncomeParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo membresías con pago registrado</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseRecurringIncome}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openInventoryCurrentModal} onClose={handleCloseInventoryCurrent}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de inventario actual</h2>
+        <form onSubmit={handleInventoryCurrentReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Categoría (opcional)</span>
+            <select
+              name="categoryId"
+              value={inventoryCurrentParams.categoryId}
+              onChange={handleInventoryCurrentParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={inventoryCurrentParams.search}
+              onChange={handleInventoryCurrentParamsChange}
+              placeholder="SKU, nombre o categoría"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="includeInactive"
+              checked={inventoryCurrentParams.includeInactive}
+              onChange={handleInventoryCurrentParamsChange}
+            />
+            <span className="text-sm font-semibold">Incluir productos inactivos</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="includeZeroStock"
+              checked={inventoryCurrentParams.includeZeroStock}
+              onChange={handleInventoryCurrentParamsChange}
+            />
+            <span className="text-sm font-semibold">Incluir productos con stock en cero</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseInventoryCurrent}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openLowStockModal} onClose={handleCloseLowStock}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de productos bajos en stock</h2>
+        <form onSubmit={handleLowStockReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Categoría (opcional)</span>
+            <select
+              name="categoryId"
+              value={lowStockParams.categoryId}
+              onChange={handleLowStockParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={lowStockParams.search}
+              onChange={handleLowStockParamsChange}
+              placeholder="SKU, nombre o categoría"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="includeInactive"
+              checked={lowStockParams.includeInactive}
+              onChange={handleLowStockParamsChange}
+            />
+            <span className="text-sm font-semibold">Incluir productos inactivos</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="includeZeroMinimum"
+              checked={lowStockParams.includeZeroMinimum}
+              onChange={handleLowStockParamsChange}
+            />
+            <span className="text-sm font-semibold">Incluir mínimos en cero</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseLowStock}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openInventoryMovementsModal} onClose={handleCloseInventoryMovements}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de movimientos de inventario</h2>
+        <form onSubmit={handleInventoryMovementsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={inventoryMovementsParams.fechaInicio}
+              onChange={handleInventoryMovementsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={inventoryMovementsParams.fechaFin}
+              onChange={handleInventoryMovementsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Tipo de movimiento (opcional)</span>
+            <select
+              name="movementType"
+              value={inventoryMovementsParams.movementType}
+              onChange={handleInventoryMovementsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="purchase">Compra</option>
+              <option value="sale">Venta</option>
+              <option value="adjustment_in">Ajuste entrada</option>
+              <option value="adjustment_out">Ajuste salida</option>
+              <option value="return">Devolución</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Categoría (opcional)</span>
+            <select
+              name="categoryId"
+              value={inventoryMovementsParams.categoryId}
+              onChange={handleInventoryMovementsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Producto (opcional)</span>
+            <select
+              name="productId"
+              value={inventoryMovementsParams.productId}
+              onChange={handleInventoryMovementsParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los productos</option>
+              {inventoryProducts.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.sku} - {product.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={inventoryMovementsParams.search}
+              onChange={handleInventoryMovementsParamsChange}
+              placeholder="Producto, usuario o notas"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseInventoryMovements}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openProductKardexModal} onClose={handleCloseProductKardex}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte kardex de producto</h2>
+        <form onSubmit={handleProductKardexReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Producto</span>
+            <select
+              name="productId"
+              value={productKardexParams.productId}
+              onChange={handleProductKardexParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Seleccione un producto</option>
+              {inventoryProducts.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.sku} - {product.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={productKardexParams.fechaInicio}
+              onChange={handleProductKardexParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={productKardexParams.fechaFin}
+              onChange={handleProductKardexParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseProductKardex}
               className="px-3 py-1 rounded bg-gray-200"
             >
               Cancelar

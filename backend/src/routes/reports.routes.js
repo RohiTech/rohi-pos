@@ -48,6 +48,64 @@ function inferMembershipStatus(startDate, endDate, persistedStatus) {
   return 'activa';
 }
 
+function normalizeMembershipStatusLabel(status) {
+  const value = String(status || '').toLowerCase();
+  if (value === 'active') {
+    return 'activa';
+  }
+  if (value === 'pending') {
+    return 'pendiente';
+  }
+  if (value === 'expired') {
+    return 'expirada';
+  }
+  if (value === 'cancelled') {
+    return 'cancelada';
+  }
+  return value || 'sin estado';
+}
+
+function normalizePlanInterval(monthRaw) {
+  const month = String(monthRaw || '').trim();
+  if (!month) {
+    return null;
+  }
+
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return 'invalid';
+  }
+
+  const [year, monthPart] = month.split('-').map((value) => Number.parseInt(value, 10));
+  if (!Number.isInteger(year) || !Number.isInteger(monthPart) || monthPart < 1 || monthPart > 12) {
+    return 'invalid';
+  }
+
+  const startDate = `${String(year).padStart(4, '0')}-${String(monthPart).padStart(2, '0')}-01`;
+  const endDate = new Date(Date.UTC(year, monthPart, 0)).toISOString().slice(0, 10);
+
+  return { startDate, endDate, month };
+}
+
+function normalizeInventoryMovementTypeLabel(movementType) {
+  const value = String(movementType || '').toLowerCase();
+  if (value === 'purchase') {
+    return 'compra';
+  }
+  if (value === 'sale') {
+    return 'venta';
+  }
+  if (value === 'adjustment_in') {
+    return 'ajuste entrada';
+  }
+  if (value === 'adjustment_out') {
+    return 'ajuste salida';
+  }
+  if (value === 'return') {
+    return 'devolucion';
+  }
+  return value || 'sin tipo';
+}
+
 // Reporte de ventas por producto en PDF
 reportsRouter.get('/product-sales/pdf', async (req, res, next) => {
   console.log('Usuario autenticado en /product-sales/pdf:', req.user);
@@ -1136,6 +1194,1220 @@ reportsRouter.get('/memberships-by-client/pdf', async (req, res, next) => {
       doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
       doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
       doc.fontSize(9).text('Reporte de Membresias por Cliente', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/active-memberships/pdf', async (req, res, next) => {
+  try {
+    const {
+      as_of_date: asOfDateRaw,
+      plan_id: planIdRaw,
+      search: searchRaw,
+      with_balance_only: withBalanceOnlyRaw,
+      include_pending: includePendingRaw
+    } = req.query;
+
+    const asOfDate = String(asOfDateRaw || new Date().toISOString().slice(0, 10)).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
+    }
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const withBalanceOnly = String(withBalanceOnlyRaw || '').trim() === 'true';
+    const includePending = String(includePendingRaw || '').trim() === 'true';
+
+    const sqlParams = [asOfDate];
+    const conditions = [
+      'm.start_date <= $1::date',
+      'm.end_date >= $1::date',
+      includePending ? "m.status IN ('active', 'pending')" : "m.status = 'active'"
+    ];
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR m.membership_number ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (withBalanceOnly) {
+      conditions.push('(m.price - m.discount - m.amount_paid) > 0');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         m.membership_number,
+         m.start_date,
+         m.end_date,
+         m.status,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         (m.price - m.discount - m.amount_paid) AS balance_due,
+         c.id AS client_id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.is_active AS client_is_active,
+         mp.name AS plan_name
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY m.end_date ASC, c.last_name ASC, c.first_name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.price || 0), 0);
+    const totalPaid = rows.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+    const totalBalance = rows.reduce((sum, row) => sum + Number(row.balance_due || 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias_vigentes.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Membresias Vigentes', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Corte: ${asOfDate}`, 20);
+    const filters = [];
+    if (planId) {
+      filters.push(`Plan ID: ${planId}`);
+    }
+    if (search) {
+      filters.push(`Busqueda: ${search}`);
+    }
+    if (withBalanceOnly) {
+      filters.push('Solo con saldo pendiente');
+    }
+    filters.push(includePending ? 'Incluye pendientes' : 'Solo estado activo');
+    doc.text(`Filtros: ${filters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Membresias: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Monto: C$${totalAmount.toFixed(2)}`, { continued: true });
+    doc.text(`  Pagado: C$${totalPaid.toFixed(2)}`, { continued: true });
+    doc.text(`  Saldo: C$${totalBalance.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay membresias vigentes para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 145, align: 'left' });
+      doc.text('Membresia', 165, headerY, { width: 80, align: 'left' });
+      doc.text('Plan', 245, headerY, { width: 90, align: 'left' });
+      doc.text('Estado', 335, headerY, { width: 55, align: 'center' });
+      doc.text('Vence', 390, headerY, { width: 65, align: 'center' });
+      doc.text('Pagado', 455, headerY, { width: 45, align: 'right' });
+      doc.text('Saldo', 500, headerY, { width: 45, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        doc.text(clientLabel, 20, y, { width: 145, align: 'left' });
+        doc.text(row.membership_number || '--', 165, y, { width: 80, align: 'left' });
+        doc.text(row.plan_name || '--', 245, y, { width: 90, align: 'left' });
+        doc.text(normalizeMembershipStatusLabel(row.status), 335, y, { width: 55, align: 'center' });
+        doc.text(new Date(row.end_date).toLocaleDateString('es-NI'), 390, y, {
+          width: 65,
+          align: 'center'
+        });
+        doc.text(`C$${Number(row.amount_paid || 0).toFixed(2)}`, 455, y, { width: 45, align: 'right' });
+        doc.text(`C$${Number(row.balance_due || 0).toFixed(2)}`, 500, y, { width: 45, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Membresias Vigentes', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/memberships-by-plan/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, status: statusRaw, plan_id: planIdRaw } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const status = String(statusRaw || '').trim();
+    if (status && !['pending', 'active', 'expired', 'cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'status debe ser pending, active, expired o cancelled' });
+    }
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const sqlParams = [startDate, endDate];
+    const conditions = ['m.start_date BETWEEN $1 AND $2'];
+
+    if (status) {
+      sqlParams.push(status);
+      conditions.push(`m.status = $${sqlParams.length}`);
+    }
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    const { rows } = await query(
+      `SELECT
+         mp.id AS plan_id,
+         mp.name AS plan_name,
+         mp.duration_days,
+         COUNT(m.id)::int AS memberships_count,
+         COUNT(m.id) FILTER (WHERE m.status = 'active')::int AS active_count,
+         COUNT(m.id) FILTER (WHERE m.status = 'pending')::int AS pending_count,
+         COUNT(m.id) FILTER (WHERE m.status = 'expired')::int AS expired_count,
+         COUNT(m.id) FILTER (WHERE m.status = 'cancelled')::int AS cancelled_count,
+         COALESCE(SUM(m.price), 0)::numeric(12,2) AS gross_amount,
+         COALESCE(SUM(m.amount_paid), 0)::numeric(12,2) AS paid_amount,
+         COALESCE(SUM(m.price - m.discount - m.amount_paid), 0)::numeric(12,2) AS balance_amount
+       FROM memberships m
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY mp.id, mp.name, mp.duration_days
+       ORDER BY memberships_count DESC, mp.name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalMemberships = rows.reduce((sum, row) => sum + Number(row.memberships_count || 0), 0);
+    const totalGross = rows.reduce((sum, row) => sum + Number(row.gross_amount || 0), 0);
+    const totalPaid = rows.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0);
+    const totalBalance = rows.reduce((sum, row) => sum + Number(row.balance_amount || 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias_por_plan.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Membresias por Plan', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const filters = [];
+    if (status) {
+      filters.push(`Estado: ${status}`);
+    }
+    if (planId) {
+      filters.push(`Plan ID: ${planId}`);
+    }
+    doc.text(`Filtros: ${filters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Planes: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Membresias: ${totalMemberships}`, { continued: true });
+    doc.text(`  Facturado: C$${totalGross.toFixed(2)}`, { continued: true });
+    doc.text(`  Pagado: C$${totalPaid.toFixed(2)}`, { continued: true });
+    doc.text(`  Saldo: C$${totalBalance.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay datos de membresias por plan para el rango indicado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Plan', 20, headerY, { width: 145, align: 'left' });
+      doc.text('Total', 165, headerY, { width: 35, align: 'right' });
+      doc.text('Act.', 200, headerY, { width: 35, align: 'right' });
+      doc.text('Pend.', 235, headerY, { width: 35, align: 'right' });
+      doc.text('Exp.', 270, headerY, { width: 35, align: 'right' });
+      doc.text('Canc.', 305, headerY, { width: 35, align: 'right' });
+      doc.text('Facturado', 340, headerY, { width: 70, align: 'right' });
+      doc.text('Pagado', 410, headerY, { width: 70, align: 'right' });
+      doc.text('Saldo', 480, headerY, { width: 65, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(row.plan_name || `Plan #${row.plan_id}`, 20, y, { width: 145, align: 'left' });
+        doc.text(String(row.memberships_count || 0), 165, y, { width: 35, align: 'right' });
+        doc.text(String(row.active_count || 0), 200, y, { width: 35, align: 'right' });
+        doc.text(String(row.pending_count || 0), 235, y, { width: 35, align: 'right' });
+        doc.text(String(row.expired_count || 0), 270, y, { width: 35, align: 'right' });
+        doc.text(String(row.cancelled_count || 0), 305, y, { width: 35, align: 'right' });
+        doc.text(`C$${Number(row.gross_amount || 0).toFixed(2)}`, 340, y, { width: 70, align: 'right' });
+        doc.text(`C$${Number(row.paid_amount || 0).toFixed(2)}`, 410, y, { width: 70, align: 'right' });
+        doc.text(`C$${Number(row.balance_amount || 0).toFixed(2)}`, 480, y, { width: 65, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Membresias por Plan', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/upcoming-renewals/pdf', async (req, res, next) => {
+  try {
+    const {
+      as_of_date: asOfDateRaw,
+      days_ahead: daysAheadRaw,
+      plan_id: planIdRaw,
+      search: searchRaw,
+      only_active_clients: onlyActiveClientsRaw
+    } = req.query;
+
+    const asOfDate = String(asOfDateRaw || new Date().toISOString().slice(0, 10)).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
+    }
+
+    const daysAhead = daysAheadRaw ? Number.parseInt(String(daysAheadRaw), 10) : 7;
+    if (!Number.isInteger(daysAhead) || daysAhead < 1 || daysAhead > 90) {
+      return res.status(400).json({ message: 'days_ahead debe ser un entero entre 1 y 90' });
+    }
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const onlyActiveClients = String(onlyActiveClientsRaw || '').trim() === 'true';
+
+    const sqlParams = [asOfDate, daysAhead];
+    const conditions = [
+      "m.status IN ('active', 'pending')",
+      "m.end_date BETWEEN $1::date AND ($1::date + ($2 * INTERVAL '1 day'))"
+    ];
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (onlyActiveClients) {
+      conditions.push('c.is_active = TRUE');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         m.membership_number,
+         m.start_date,
+         m.end_date,
+         m.status,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         (m.price - m.discount - m.amount_paid) AS balance_due,
+         c.id AS client_id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.phone,
+         c.is_active AS client_is_active,
+         mp.name AS plan_name,
+         GREATEST((m.end_date - $1::date), 0)::int AS days_to_expire
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY m.end_date ASC, c.last_name ASC, c.first_name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const withBalance = rows.reduce((sum, row) => sum + (Number(row.balance_due || 0) > 0 ? 1 : 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="renovaciones_proximas.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Renovaciones Proximas', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Corte: ${asOfDate}  Ventana: ${daysAhead} dias`, 20);
+    const filters = [];
+    if (planId) {
+      filters.push(`Plan ID: ${planId}`);
+    }
+    if (search) {
+      filters.push(`Busqueda: ${search}`);
+    }
+    if (onlyActiveClients) {
+      filters.push('Solo clientes activos');
+    }
+    doc.text(`Filtros: ${filters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Renovaciones: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Con saldo: ${withBalance}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay renovaciones proximas para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 155, align: 'left' });
+      doc.text('Plan', 175, headerY, { width: 90, align: 'left' });
+      doc.text('Vence', 265, headerY, { width: 65, align: 'center' });
+      doc.text('Dias', 330, headerY, { width: 35, align: 'right' });
+      doc.text('Estado', 365, headerY, { width: 65, align: 'center' });
+      doc.text('Telefono', 430, headerY, { width: 70, align: 'center' });
+      doc.text('Saldo', 500, headerY, { width: 45, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        doc.text(clientLabel, 20, y, { width: 155, align: 'left' });
+        doc.text(row.plan_name || '--', 175, y, { width: 90, align: 'left' });
+        doc.text(new Date(row.end_date).toLocaleDateString('es-NI'), 265, y, { width: 65, align: 'center' });
+        doc.text(String(row.days_to_expire || 0), 330, y, { width: 35, align: 'right' });
+        doc.text(normalizeMembershipStatusLabel(row.status), 365, y, { width: 65, align: 'center' });
+        doc.text(row.phone || '--', 430, y, { width: 70, align: 'center' });
+        doc.text(`C$${Number(row.balance_due || 0).toFixed(2)}`, 500, y, { width: 45, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Renovaciones Proximas', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/recurring-income/pdf', async (req, res, next) => {
+  try {
+    const {
+      month: monthRaw,
+      plan_id: planIdRaw,
+      status: statusRaw,
+      only_paid: onlyPaidRaw
+    } = req.query;
+
+    const interval = normalizePlanInterval(monthRaw);
+    if (interval === 'invalid') {
+      return res.status(400).json({ message: 'month debe tener formato YYYY-MM' });
+    }
+
+    const selectedMonth = interval || normalizePlanInterval(new Date().toISOString().slice(0, 7));
+    const { startDate, endDate, month } = selectedMonth;
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const status = String(statusRaw || '').trim();
+    if (status && !['pending', 'active', 'expired', 'cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'status debe ser pending, active, expired o cancelled' });
+    }
+
+    const onlyPaid = String(onlyPaidRaw || '').trim() === 'true';
+
+    const sqlParams = [startDate, endDate];
+    const conditions = ['m.start_date BETWEEN $1 AND $2'];
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    if (status) {
+      sqlParams.push(status);
+      conditions.push(`m.status = $${sqlParams.length}`);
+    }
+
+    if (onlyPaid) {
+      conditions.push('m.amount_paid > 0');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         mp.id AS plan_id,
+         mp.name AS plan_name,
+         COUNT(m.id)::int AS memberships_count,
+         COALESCE(SUM(m.price), 0)::numeric(12,2) AS expected_income,
+         COALESCE(SUM(m.amount_paid), 0)::numeric(12,2) AS paid_income,
+         COALESCE(SUM(m.price - m.discount - m.amount_paid), 0)::numeric(12,2) AS pending_income,
+         COALESCE(SUM(m.discount), 0)::numeric(12,2) AS discount_amount
+       FROM memberships m
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY mp.id, mp.name
+       ORDER BY expected_income DESC, mp.name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.memberships += Number(row.memberships_count || 0);
+        acc.expected += Number(row.expected_income || 0);
+        acc.paid += Number(row.paid_income || 0);
+        acc.pending += Number(row.pending_income || 0);
+        acc.discount += Number(row.discount_amount || 0);
+        return acc;
+      },
+      { memberships: 0, expected: 0, paid: 0, pending: 0, discount: 0 }
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ingresos_recurrentes.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ingresos Recurrentes', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Mes: ${month}  Rango: ${startDate} a ${endDate}`, 20);
+    const filters = [];
+    if (planId) {
+      filters.push(`Plan ID: ${planId}`);
+    }
+    if (status) {
+      filters.push(`Estado: ${status}`);
+    }
+    if (onlyPaid) {
+      filters.push('Solo membresias con pago');
+    }
+    doc.text(`Filtros: ${filters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Membresias: ${totals.memberships}`, 20, doc.y, { continued: true });
+    doc.text(`  Esperado: C$${totals.expected.toFixed(2)}`, { continued: true });
+    doc.text(`  Cobrado: C$${totals.paid.toFixed(2)}`, { continued: true });
+    doc.text(`  Pendiente: C$${totals.pending.toFixed(2)}`, { continued: true });
+    doc.text(`  Descuento: C$${totals.discount.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay ingresos de membresias para el periodo seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Plan', 20, headerY, { width: 190, align: 'left' });
+      doc.text('Membresias', 210, headerY, { width: 65, align: 'right' });
+      doc.text('Esperado', 275, headerY, { width: 90, align: 'right' });
+      doc.text('Cobrado', 365, headerY, { width: 90, align: 'right' });
+      doc.text('Pendiente', 455, headerY, { width: 90, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(row.plan_name || `Plan #${row.plan_id}`, 20, y, { width: 190, align: 'left' });
+        doc.text(String(row.memberships_count || 0), 210, y, { width: 65, align: 'right' });
+        doc.text(`C$${Number(row.expected_income || 0).toFixed(2)}`, 275, y, { width: 90, align: 'right' });
+        doc.text(`C$${Number(row.paid_income || 0).toFixed(2)}`, 365, y, { width: 90, align: 'right' });
+        doc.text(`C$${Number(row.pending_income || 0).toFixed(2)}`, 455, y, { width: 90, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ingresos Recurrentes', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/inventory-current/pdf', async (req, res, next) => {
+  try {
+    const {
+      category_id: categoryIdRaw,
+      search: searchRaw,
+      include_inactive: includeInactiveRaw,
+      include_zero_stock: includeZeroStockRaw
+    } = req.query;
+
+    const categoryId = categoryIdRaw ? Number.parseInt(String(categoryIdRaw), 10) : null;
+    if (categoryIdRaw && (!Number.isInteger(categoryId) || categoryId <= 0)) {
+      return res.status(400).json({ message: 'category_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const includeInactive = String(includeInactiveRaw || '').trim() === 'true';
+    const includeZeroStock = String(includeZeroStockRaw || '').trim() === 'true';
+
+    const conditions = [];
+    const sqlParams = [];
+
+    if (categoryId) {
+      sqlParams.push(categoryId);
+      conditions.push(`p.category_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(p.sku ILIKE $${sqlParams.length} OR p.name ILIKE $${sqlParams.length} OR COALESCE(pc.name, '') ILIKE $${sqlParams.length} OR COALESCE(p.barcode, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (!includeInactive) {
+      conditions.push('p.is_active = TRUE');
+    }
+
+    if (!includeZeroStock) {
+      conditions.push('p.stock_quantity > 0');
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const { rows } = await query(
+      `SELECT
+         p.id,
+         p.sku,
+         p.name,
+         p.stock_quantity,
+         p.minimum_stock,
+         p.sale_price,
+         p.cost_price,
+         p.is_active,
+         pc.name AS category_name,
+         (p.stock_quantity * p.cost_price)::numeric(12,2) AS stock_cost_value,
+         (p.stock_quantity * p.sale_price)::numeric(12,2) AS stock_sale_value
+       FROM products p
+       LEFT JOIN product_categories pc ON pc.id = p.category_id
+       ${whereClause}
+       ORDER BY p.name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalCostValue = rows.reduce((sum, row) => sum + Number(row.stock_cost_value || 0), 0);
+    const totalSaleValue = rows.reduce((sum, row) => sum + Number(row.stock_sale_value || 0), 0);
+    const lowStockCount = rows.reduce(
+      (sum, row) => sum + (Number(row.stock_quantity) <= Number(row.minimum_stock) ? 1 : 0),
+      0
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventario_actual.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Inventario Actual', { align: 'center' });
+    doc.moveDown();
+    const filters = [];
+    if (categoryId) {
+      filters.push(`Categoria ID: ${categoryId}`);
+    }
+    if (search) {
+      filters.push(`Busqueda: ${search}`);
+    }
+    filters.push(includeInactive ? 'Incluye inactivos' : 'Solo activos');
+    filters.push(includeZeroStock ? 'Incluye stock en cero' : 'Excluye stock en cero');
+    doc.fontSize(12).text(`Filtros: ${filters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Productos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Bajo stock: ${lowStockCount}`, { continued: true });
+    doc.text(`  Valor costo: C$${totalCostValue.toFixed(2)}`, { continued: true });
+    doc.text(`  Valor venta: C$${totalSaleValue.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay productos para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('SKU', 20, headerY, { width: 70, align: 'left' });
+      doc.text('Producto', 90, headerY, { width: 160, align: 'left' });
+      doc.text('Categoria', 250, headerY, { width: 95, align: 'left' });
+      doc.text('Stock', 345, headerY, { width: 40, align: 'right' });
+      doc.text('Min.', 385, headerY, { width: 35, align: 'right' });
+      doc.text('Costo', 420, headerY, { width: 60, align: 'right' });
+      doc.text('Venta', 480, headerY, { width: 65, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(row.sku || '--', 20, y, { width: 70, align: 'left' });
+        doc.text(row.name || '--', 90, y, { width: 160, align: 'left' });
+        doc.text(row.category_name || '--', 250, y, { width: 95, align: 'left' });
+        doc.text(Number(row.stock_quantity || 0).toFixed(2), 345, y, { width: 40, align: 'right' });
+        doc.text(Number(row.minimum_stock || 0).toFixed(2), 385, y, { width: 35, align: 'right' });
+        doc.text(`C$${Number(row.cost_price || 0).toFixed(2)}`, 420, y, { width: 60, align: 'right' });
+        doc.text(`C$${Number(row.sale_price || 0).toFixed(2)}`, 480, y, { width: 65, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Inventario Actual', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/low-stock-products/pdf', async (req, res, next) => {
+  try {
+    const {
+      category_id: categoryIdRaw,
+      search: searchRaw,
+      include_inactive: includeInactiveRaw,
+      include_zero_minimum: includeZeroMinimumRaw
+    } = req.query;
+
+    const categoryId = categoryIdRaw ? Number.parseInt(String(categoryIdRaw), 10) : null;
+    if (categoryIdRaw && (!Number.isInteger(categoryId) || categoryId <= 0)) {
+      return res.status(400).json({ message: 'category_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const includeInactive = String(includeInactiveRaw || '').trim() === 'true';
+    const includeZeroMinimum = String(includeZeroMinimumRaw || '').trim() === 'true';
+
+    const sqlParams = [];
+    const conditions = ['p.stock_quantity <= p.minimum_stock'];
+
+    if (!includeZeroMinimum) {
+      conditions.push('p.minimum_stock > 0');
+    }
+
+    if (categoryId) {
+      sqlParams.push(categoryId);
+      conditions.push(`p.category_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(p.sku ILIKE $${sqlParams.length} OR p.name ILIKE $${sqlParams.length} OR COALESCE(pc.name, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (!includeInactive) {
+      conditions.push('p.is_active = TRUE');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         p.id,
+         p.sku,
+         p.name,
+         p.stock_quantity,
+         p.minimum_stock,
+         p.sale_price,
+         p.cost_price,
+         p.is_active,
+         pc.name AS category_name,
+         (p.minimum_stock - p.stock_quantity)::numeric(12,2) AS deficit
+       FROM products p
+       LEFT JOIN product_categories pc ON pc.id = p.category_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY deficit DESC, p.name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalDeficit = rows.reduce((sum, row) => sum + Math.max(Number(row.deficit || 0), 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="productos_bajos_stock.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Productos Bajos en Stock', { align: 'center' });
+    doc.moveDown();
+    const filters = [];
+    if (categoryId) {
+      filters.push(`Categoria ID: ${categoryId}`);
+    }
+    if (search) {
+      filters.push(`Busqueda: ${search}`);
+    }
+    filters.push(includeInactive ? 'Incluye inactivos' : 'Solo activos');
+    filters.push(includeZeroMinimum ? 'Incluye minimo cero' : 'Excluye minimo cero');
+    doc.fontSize(12).text(`Filtros: ${filters.join(' | ')}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Productos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Deficit total: ${totalDeficit.toFixed(2)} unidades`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay productos bajo stock con los filtros indicados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('SKU', 20, headerY, { width: 75, align: 'left' });
+      doc.text('Producto', 95, headerY, { width: 180, align: 'left' });
+      doc.text('Categoria', 275, headerY, { width: 105, align: 'left' });
+      doc.text('Stock', 380, headerY, { width: 45, align: 'right' });
+      doc.text('Min.', 425, headerY, { width: 45, align: 'right' });
+      doc.text('Deficit', 470, headerY, { width: 75, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(row.sku || '--', 20, y, { width: 75, align: 'left' });
+        doc.text(row.name || '--', 95, y, { width: 180, align: 'left' });
+        doc.text(row.category_name || '--', 275, y, { width: 105, align: 'left' });
+        doc.text(Number(row.stock_quantity || 0).toFixed(2), 380, y, { width: 45, align: 'right' });
+        doc.text(Number(row.minimum_stock || 0).toFixed(2), 425, y, { width: 45, align: 'right' });
+        doc.text(Number(row.deficit || 0).toFixed(2), 470, y, { width: 75, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Productos Bajos en Stock', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/inventory-movements/pdf', async (req, res, next) => {
+  try {
+    const {
+      fechaInicio,
+      fechaFin,
+      movement_type: movementTypeRaw,
+      category_id: categoryIdRaw,
+      product_id: productIdRaw,
+      search: searchRaw
+    } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const movementType = String(movementTypeRaw || '').trim();
+    const allowedMovementTypes = new Set([
+      'purchase',
+      'sale',
+      'adjustment_in',
+      'adjustment_out',
+      'return'
+    ]);
+    if (movementType && !allowedMovementTypes.has(movementType)) {
+      return res.status(400).json({
+        message: 'movement_type debe ser purchase, sale, adjustment_in, adjustment_out o return'
+      });
+    }
+
+    const categoryId = categoryIdRaw ? Number.parseInt(String(categoryIdRaw), 10) : null;
+    if (categoryIdRaw && (!Number.isInteger(categoryId) || categoryId <= 0)) {
+      return res.status(400).json({ message: 'category_id debe ser un entero positivo' });
+    }
+
+    const productId = productIdRaw ? Number.parseInt(String(productIdRaw), 10) : null;
+    if (productIdRaw && (!Number.isInteger(productId) || productId <= 0)) {
+      return res.status(400).json({ message: 'product_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+
+    const sqlParams = [startDate, endDate];
+    const conditions = ['im.moved_at::date BETWEEN $1 AND $2'];
+
+    if (movementType) {
+      sqlParams.push(movementType);
+      conditions.push(`im.movement_type = $${sqlParams.length}`);
+    }
+
+    if (categoryId) {
+      sqlParams.push(categoryId);
+      conditions.push(`p.category_id = $${sqlParams.length}`);
+    }
+
+    if (productId) {
+      sqlParams.push(productId);
+      conditions.push(`im.product_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(p.sku ILIKE $${sqlParams.length} OR p.name ILIKE $${sqlParams.length} OR COALESCE(im.notes, '') ILIKE $${sqlParams.length} OR COALESCE(u.username, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    const { rows } = await query(
+      `SELECT
+         im.id,
+         im.movement_type,
+         im.quantity,
+         im.previous_stock,
+         im.new_stock,
+         im.unit_cost,
+         im.reference_type,
+         im.reference_id,
+         im.notes,
+         im.moved_at,
+         p.id AS product_id,
+         p.sku,
+         p.name AS product_name,
+         pc.name AS category_name,
+         u.username AS user_name
+       FROM inventory_movements im
+       INNER JOIN products p ON p.id = im.product_id
+       LEFT JOIN product_categories pc ON pc.id = p.category_id
+       LEFT JOIN users u ON u.id = im.user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY im.moved_at DESC, im.id DESC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalEntries = rows.reduce(
+      (sum, row) => sum + (['purchase', 'adjustment_in', 'return'].includes(row.movement_type) ? Number(row.quantity || 0) : 0),
+      0
+    );
+    const totalExits = rows.reduce(
+      (sum, row) => sum + (['sale', 'adjustment_out'].includes(row.movement_type) ? Number(row.quantity || 0) : 0),
+      0
+    );
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="movimientos_inventario.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Movimientos de Inventario', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    const filters = [];
+    if (movementType) {
+      filters.push(`Tipo: ${movementType}`);
+    }
+    if (categoryId) {
+      filters.push(`Categoria ID: ${categoryId}`);
+    }
+    if (productId) {
+      filters.push(`Producto ID: ${productId}`);
+    }
+    if (search) {
+      filters.push(`Busqueda: ${search}`);
+    }
+    doc.text(`Filtros: ${filters.join(' | ') || 'Sin filtros adicionales'}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Movimientos: ${rows.length}`, 20, doc.y, { continued: true });
+    doc.text(`  Entradas: ${totalEntries.toFixed(2)}`, { continued: true });
+    doc.text(`  Salidas: ${totalExits.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay movimientos de inventario para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Fecha', 20, headerY, { width: 70, align: 'left' });
+      doc.text('Producto', 90, headerY, { width: 170, align: 'left' });
+      doc.text('Tipo', 260, headerY, { width: 80, align: 'left' });
+      doc.text('Cant.', 340, headerY, { width: 45, align: 'right' });
+      doc.text('Antes', 385, headerY, { width: 50, align: 'right' });
+      doc.text('Despues', 435, headerY, { width: 55, align: 'right' });
+      doc.text('Usuario', 490, headerY, { width: 55, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(new Date(row.moved_at).toLocaleDateString('es-NI'), 20, y, {
+          width: 70,
+          align: 'left'
+        });
+        doc.text(`${row.sku || '--'} - ${row.product_name || '--'}`, 90, y, {
+          width: 170,
+          align: 'left'
+        });
+        doc.text(normalizeInventoryMovementTypeLabel(row.movement_type), 260, y, {
+          width: 80,
+          align: 'left'
+        });
+        doc.text(Number(row.quantity || 0).toFixed(2), 340, y, { width: 45, align: 'right' });
+        doc.text(Number(row.previous_stock || 0).toFixed(2), 385, y, { width: 50, align: 'right' });
+        doc.text(Number(row.new_stock || 0).toFixed(2), 435, y, { width: 55, align: 'right' });
+        doc.text(row.user_name || '--', 490, y, { width: 55, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Movimientos de Inventario', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/product-kardex/pdf', async (req, res, next) => {
+  try {
+    const { product_id: productIdRaw, fechaInicio, fechaFin } = req.query;
+
+    const productId = productIdRaw ? Number.parseInt(String(productIdRaw), 10) : null;
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ message: 'product_id es requerido y debe ser un entero positivo' });
+    }
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const productResult = await query(
+      `SELECT p.id, p.sku, p.name, p.stock_quantity, p.minimum_stock, p.unit_label, pc.name AS category_name
+       FROM products p
+       LEFT JOIN product_categories pc ON pc.id = p.category_id
+       WHERE p.id = $1`,
+      [productId]
+    );
+
+    if (productResult.rowCount === 0) {
+      return res.status(404).json({ message: 'Producto no encontrado' });
+    }
+
+    const product = productResult.rows[0];
+
+    const openingStockResult = await query(
+      `SELECT new_stock
+       FROM inventory_movements
+       WHERE product_id = $1
+         AND moved_at::date < $2::date
+       ORDER BY moved_at DESC, id DESC
+       LIMIT 1`,
+      [productId, startDate]
+    );
+
+    const openingStock = openingStockResult.rowCount > 0
+      ? Number(openingStockResult.rows[0].new_stock)
+      : 0;
+
+    const { rows } = await query(
+      `SELECT
+         im.id,
+         im.movement_type,
+         im.quantity,
+         im.previous_stock,
+         im.new_stock,
+         im.unit_cost,
+         im.reference_type,
+         im.reference_id,
+         im.notes,
+         im.moved_at,
+         u.username AS user_name
+       FROM inventory_movements im
+       LEFT JOIN users u ON u.id = im.user_id
+       WHERE im.product_id = $1
+         AND im.moved_at::date BETWEEN $2 AND $3
+       ORDER BY im.moved_at ASC, im.id ASC`,
+      [productId, startDate, endDate]
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalEntries = rows.reduce(
+      (sum, row) => sum + (['purchase', 'adjustment_in', 'return'].includes(row.movement_type) ? Number(row.quantity || 0) : 0),
+      0
+    );
+    const totalExits = rows.reduce(
+      (sum, row) => sum + (['sale', 'adjustment_out'].includes(row.movement_type) ? Number(row.quantity || 0) : 0),
+      0
+    );
+    const closingStock = rows.length > 0
+      ? Number(rows[rows.length - 1].new_stock || 0)
+      : openingStock;
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="kardex_producto_${productId}.pdf"`);
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Kardex de Producto', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Producto: ${product.sku || '--'} - ${product.name || '--'}`, 20);
+    doc.text(`Categoria: ${product.category_name || '--'} | Unidad: ${product.unit_label || 'unit'}`, 20);
+    doc.text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold');
+    doc.text(`Stock inicial: ${openingStock.toFixed(2)}`, 20, doc.y, { continued: true });
+    doc.text(`  Entradas: ${totalEntries.toFixed(2)}`, { continued: true });
+    doc.text(`  Salidas: ${totalExits.toFixed(2)}`, { continued: true });
+    doc.text(`  Stock final: ${closingStock.toFixed(2)}`);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.font('Helvetica').text('No hay movimientos del producto en el rango de fechas seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Fecha', 20, headerY, { width: 70, align: 'left' });
+      doc.text('Tipo', 90, headerY, { width: 95, align: 'left' });
+      doc.text('Entrada', 185, headerY, { width: 55, align: 'right' });
+      doc.text('Salida', 240, headerY, { width: 55, align: 'right' });
+      doc.text('Stock', 295, headerY, { width: 55, align: 'right' });
+      doc.text('Referencia', 350, headerY, { width: 90, align: 'left' });
+      doc.text('Usuario', 440, headerY, { width: 50, align: 'right' });
+      doc.text('Nota', 490, headerY, { width: 55, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const isEntry = ['purchase', 'adjustment_in', 'return'].includes(row.movement_type);
+        const reference = row.reference_type
+          ? `${row.reference_type}${row.reference_id ? `#${row.reference_id}` : ''}`
+          : '--';
+
+        doc.text(new Date(row.moved_at).toLocaleDateString('es-NI'), 20, y, { width: 70, align: 'left' });
+        doc.text(normalizeInventoryMovementTypeLabel(row.movement_type), 90, y, { width: 95, align: 'left' });
+        doc.text(isEntry ? Number(row.quantity || 0).toFixed(2) : '--', 185, y, { width: 55, align: 'right' });
+        doc.text(!isEntry ? Number(row.quantity || 0).toFixed(2) : '--', 240, y, { width: 55, align: 'right' });
+        doc.text(Number(row.new_stock || 0).toFixed(2), 295, y, { width: 55, align: 'right' });
+        doc.text(reference, 350, y, { width: 90, align: 'left' });
+        doc.text(row.user_name || '--', 440, y, { width: 50, align: 'right' });
+        doc.text(row.notes || '--', 490, y, { width: 55, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Kardex de Producto', 1, bottom, { align: 'center' });
       doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
       doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
     }
