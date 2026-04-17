@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import PDFDocument from 'pdfkit';
 import { query, withTransaction } from '../config/db.js';
 import { getOrCreateOpenCashSession } from './cash-register.routes.js';
 import {
@@ -235,6 +236,107 @@ salesRouter.get('/:id', async (request, response, next) => {
     }
 
     response.json({ ok: true, data: sale });
+  } catch (error) {
+    next(error);
+  }
+});
+
+salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
+  try {
+    const saleId = parsePositiveInteger(request.params.id);
+    if (!saleId) {
+      throw createHttpError(400, 'Sale id must be a positive integer');
+    }
+
+    const sale = await getSaleById(saleId);
+    if (!sale) {
+      throw createHttpError(404, 'Sale not found');
+    }
+
+    const itemRows = (sale.items || []).filter((item) => item.item_type === 'product');
+    const paymentRows = sale.payments || [];
+    const paymentMethodLabel = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      mobile: 'Movil',
+      other: 'Otro'
+    };
+
+    const doc = new PDFDocument({ margin: 34, size: [226.77, 640] });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `inline; filename="voucher_${sale.sale_number || sale.id}.pdf"`
+    );
+    doc.pipe(response);
+
+    doc.font('Helvetica-Bold').fontSize(14).text('ROHIPOS', { align: 'center' });
+    doc.font('Helvetica').fontSize(9).text('Comprobante de venta', { align: 'center' });
+    doc.moveDown(0.6);
+
+    doc.fontSize(8).text(`Recibo: ${sale.sale_number || sale.id}`);
+    doc.text(`Fecha: ${new Date(sale.sold_at).toLocaleString('es-NI')}`);
+    doc.text(`Cajero: ${sale.cashier_username || sale.cashier_user_id}`);
+    doc.text(
+      `Cliente: ${sale.client_first_name ? `${sale.client_first_name} ${sale.client_last_name || ''}`.trim() : 'Mostrador'}`
+    );
+    doc.moveDown(0.6);
+
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('Producto', 34, doc.y, { width: 100, align: 'left' });
+    doc.text('Cant.', 136, doc.y, { width: 25, align: 'right' });
+    doc.text('Importe', 162, doc.y, { width: 30, align: 'right' });
+    doc.moveDown(0.8);
+    doc.font('Helvetica').fontSize(8);
+
+    if (!itemRows.length) {
+      doc.text('Sin lineas de producto', { align: 'left' });
+    } else {
+      itemRows.forEach((item) => {
+        const y = doc.y;
+        doc.text(item.description || '-', 34, y, { width: 100, align: 'left' });
+        doc.text(Number(item.quantity || 0).toFixed(2), 136, y, { width: 25, align: 'right' });
+        doc.text(`C$${Number(item.line_total || 0).toFixed(2)}`, 162, y, { width: 30, align: 'right' });
+        doc.moveDown(0.65);
+      });
+    }
+
+    doc.moveDown(0.4);
+    doc.moveTo(34, doc.y).lineTo(192, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(0.5);
+
+    doc.font('Helvetica').fontSize(8);
+    doc.text('Subtotal', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${Number(sale.subtotal || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.4);
+    doc.text('Descuento', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${Number(sale.discount || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.4);
+    doc.text('Impuesto', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${Number(sale.tax || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.5);
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${Number(sale.total || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.7);
+
+    doc.font('Helvetica').fontSize(8).text('Pagos', { align: 'left' });
+    if (!paymentRows.length) {
+      doc.text('Sin pagos asociados');
+    } else {
+      paymentRows.forEach((payment) => {
+        const label = paymentMethodLabel[payment.payment_method] || payment.payment_method;
+        doc.text(`${label}: C$${Number(payment.amount || 0).toFixed(2)}`);
+      });
+    }
+
+    doc.moveDown(0.8);
+    doc.fontSize(8).text('Gracias por su compra', { align: 'center' });
+    doc.text('RohiPOS', { align: 'center' });
+
+    doc.end();
   } catch (error) {
     next(error);
   }

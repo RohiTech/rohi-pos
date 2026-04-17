@@ -692,6 +692,29 @@ export function PosPage() {
     }
   }
 
+  async function openSaleVoucherReport(sale) {
+    const saleId = Number(sale?.id);
+    if (!Number.isInteger(saleId) || saleId <= 0) {
+      return;
+    }
+
+    const response = await fetch(`http://localhost:3001/api/sales/${saleId}/voucher/pdf`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('No fue posible abrir el voucher de la venta');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 15000);
+  }
+
   function handleSaleItemChange(index, field, value) {
     setSaleForm((current) => ({
       ...current,
@@ -1017,10 +1040,21 @@ export function PosPage() {
         }))
       };
 
+      let savedSale = null;
+
       if (editingReceiptId) {
         await apiPut(`/sales/${editingReceiptId}/receipt`, payload);
       } else {
-        await apiPost('/sales', payload);
+        const createResponse = await apiPost('/sales', payload);
+        savedSale = createResponse.data || null;
+      }
+
+      if (!editingReceiptId) {
+        try {
+          await openSaleVoucherReport(savedSale);
+        } catch {
+          // The sale was completed; keep success message even if voucher preview fails.
+        }
       }
 
       clearTicket();
