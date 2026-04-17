@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 const navigation = [
   { to: '/', label: 'Dashboard', shortLabel: 'DB' },
   { to: '/attendance', label: 'Asistencia', shortLabel: 'AS' },
+  { to: '/attendance-kiosk', label: 'Asistencia QR', shortLabel: 'QR' },
   { to: '/clients', label: 'Clientes', shortLabel: 'CL' },
   { to: '/memberships', label: 'Membresias', shortLabel: 'MB' },
   { to: '/pos', label: 'POS', shortLabel: 'POS' },

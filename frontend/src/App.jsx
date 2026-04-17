@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { AttendancePage } from './pages/AttendancePage';
+import { AttendanceKioskPage } from './pages/AttendanceKioskPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ClientsPage } from './pages/ClientsPage';
 import { LoginPage } from './pages/LoginPage';
@@ -18,6 +19,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
+        <Route path="/attendance-kiosk" element={<AttendanceKioskPage />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />

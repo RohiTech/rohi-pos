@@ -36,6 +36,28 @@ async function ensureClientExists(clientId) {
   return result.rows[0];
 }
 
+async function resolveClientByCode(clientCode) {
+  const normalizedCode = String(clientCode || '').trim();
+
+  if (!normalizedCode) {
+    throw createHttpError(400, 'client_code is required');
+  }
+
+  const result = await query(
+    `SELECT id, client_code, first_name, last_name, is_active
+     FROM clients
+     WHERE LOWER(client_code) = LOWER($1)
+     LIMIT 1`,
+    [normalizedCode]
+  );
+
+  if (result.rowCount === 0) {
+    throw createHttpError(404, 'Client code not found');
+  }
+
+  return result.rows[0];
+}
+
 function ensureClientIsActive(client) {
   if (!client.is_active) {
     throw createHttpError(409, 'El cliente esta inactivo y no puede marcar asistencia.');
@@ -107,6 +129,104 @@ async function getLatestMembershipForClient(clientId, dbClient = null) {
     effective_status: effectiveStatus,
     days_until_expiry: daysUntilExpiry
   };
+}
+
+async function processAttendanceCheckin({
+  clientId,
+  checkedInByUserId,
+  accessType,
+  paymentMethod,
+  dailyPassAmount,
+  notes
+}) {
+  const client = await ensureClientExists(clientId);
+  ensureClientIsActive(client);
+  await ensureUserExists(checkedInByUserId);
+  const settings = await getSystemSettings();
+
+  return withTransaction(async (dbClient) => {
+    const membership = await getLatestMembershipForClient(clientId, dbClient);
+
+    if (accessType === 'membership') {
+      if (membership && membership.effective_status === 'active') {
+        const checkinResult = await dbClient.query(
+          `INSERT INTO checkins (
+             client_id, membership_id, checked_in_by_user_id, status, access_type, notes
+           )
+           VALUES ($1, $2, $3, 'allowed', 'membership', $4)
+           RETURNING id, checked_in_at, status, access_type`,
+          [clientId, membership.id, checkedInByUserId, notes]
+        );
+
+        const warning =
+          membership.days_until_expiry >= 0 &&
+          membership.days_until_expiry <= settings.membership_expiry_alert_days
+            ? `La membresia vence en ${membership.days_until_expiry} dia(s).`
+            : null;
+
+        return {
+          ...checkinResult.rows[0],
+          client,
+          membership,
+          warning_message: warning
+        };
+      }
+
+      const deniedReason =
+        membership && membership.effective_status === 'expired'
+          ? 'La membresia esta expirada. Debe renovarla.'
+          : membership && membership.effective_status === 'cancelled'
+            ? 'La membresia del cliente esta cancelada.'
+            : 'El cliente no tiene una membresia vigente.';
+      throw createHttpError(409, deniedReason);
+    }
+
+    const parsedDailyPassAmount = parsePositiveNumber(dailyPassAmount, 'daily_pass_amount');
+    const paymentNumber = `DAY-${Date.now().toString().slice(-6)}`;
+
+    const paymentResult = await dbClient.query(
+      `INSERT INTO payments (
+         payment_number,
+         client_id,
+         received_by_user_id,
+         payment_method,
+         amount,
+         currency_code,
+         notes
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, payment_number, amount, payment_method, paid_at`,
+      [
+        paymentNumber,
+        clientId,
+        checkedInByUserId,
+        paymentMethod,
+        parsedDailyPassAmount,
+        settings.currency_code,
+        notes || 'Pago diario de acceso'
+      ]
+    );
+
+    const checkinResult = await dbClient.query(
+      `INSERT INTO checkins (
+         client_id, membership_id, payment_id, checked_in_by_user_id, status, access_type, notes
+       )
+       VALUES ($1, $2, $3, $4, 'allowed', 'daily_pass', $5)
+       RETURNING id, checked_in_at, status, access_type`,
+      [clientId, membership?.id || null, paymentResult.rows[0].id, checkedInByUserId, notes]
+    );
+
+    return {
+      ...checkinResult.rows[0],
+      client,
+      membership,
+      payment: paymentResult.rows[0],
+      warning_message:
+        membership?.effective_status === 'expired'
+          ? 'La membresia esta expirada. Se registro ingreso por pago diario.'
+          : null
+    };
+  });
 }
 
 attendanceRouter.get('/clients', async (request, response, next) => {
@@ -271,92 +391,57 @@ attendanceRouter.post('/checkins', async (request, response, next) => {
       throw createHttpError(400, 'payment_method is invalid');
     }
 
-    const client = await ensureClientExists(clientId);
-    ensureClientIsActive(client);
-    await ensureUserExists(checkedInByUserId);
-    const settings = await getSystemSettings();
+    const result = await processAttendanceCheckin({
+      clientId,
+      checkedInByUserId,
+      accessType,
+      paymentMethod,
+      dailyPassAmount: request.body.daily_pass_amount,
+      notes
+    });
 
-    const result = await withTransaction(async (dbClient) => {
-      const membership = await getLatestMembershipForClient(clientId, dbClient);
+    response.status(201).json({
+      ok: true,
+      message: 'Check-in processed successfully',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
-      if (accessType === 'membership') {
-        if (membership && membership.effective_status === 'active') {
-          const checkinResult = await dbClient.query(
-            `INSERT INTO checkins (
-               client_id, membership_id, checked_in_by_user_id, status, access_type, notes
-             )
-             VALUES ($1, $2, $3, 'allowed', 'membership', $4)
-             RETURNING id, checked_in_at, status, access_type`,
-            [clientId, membership.id, checkedInByUserId, notes]
-          );
+attendanceRouter.post('/checkins/by-code', async (request, response, next) => {
+  try {
+    const clientCode = String(request.body.client_code || '').trim();
+    const checkedInByUserId = parsePositiveInteger(request.body.checked_in_by_user_id);
+    const accessType = String(request.body.access_type || 'membership').trim();
+    const paymentMethod = String(request.body.payment_method || 'cash').trim();
+    const notes = String(request.body.notes || '').trim() || null;
 
-          const warning =
-            membership.days_until_expiry >= 0 &&
-            membership.days_until_expiry <= settings.membership_expiry_alert_days
-              ? `La membresia vence en ${membership.days_until_expiry} dia(s).`
-              : null;
+    if (!clientCode) {
+      throw createHttpError(400, 'client_code is required');
+    }
 
-          return {
-            ...checkinResult.rows[0],
-            client,
-            membership,
-            warning_message: warning
-          };
-        }
+    if (!checkedInByUserId) {
+      throw createHttpError(400, 'checked_in_by_user_id must be a positive integer');
+    }
 
-        const deniedReason =
-          membership && membership.effective_status === 'expired'
-            ? 'La membresia esta expirada. Debe renovarla.'
-            : membership && membership.effective_status === 'cancelled'
-              ? 'La membresia del cliente esta cancelada.'
-            : 'El cliente no tiene una membresia vigente.';
-        throw createHttpError(409, deniedReason);
-      }
+    if (!['membership', 'daily_pass'].includes(accessType)) {
+      throw createHttpError(400, 'access_type is invalid');
+    }
 
-      const dailyPassAmount = parsePositiveNumber(request.body.daily_pass_amount, 'daily_pass_amount');
-      const paymentNumber = `DAY-${Date.now().toString().slice(-6)}`;
+    if (!ALLOWED_PAYMENT_METHODS.has(paymentMethod)) {
+      throw createHttpError(400, 'payment_method is invalid');
+    }
 
-      const paymentResult = await dbClient.query(
-        `INSERT INTO payments (
-           payment_number,
-           client_id,
-           received_by_user_id,
-           payment_method,
-           amount,
-           currency_code,
-           notes
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, payment_number, amount, payment_method, paid_at`,
-        [
-          paymentNumber,
-          clientId,
-          checkedInByUserId,
-          paymentMethod,
-          dailyPassAmount,
-          settings.currency_code,
-          notes || 'Pago diario de acceso'
-        ]
-      );
-
-      const checkinResult = await dbClient.query(
-        `INSERT INTO checkins (
-           client_id, membership_id, payment_id, checked_in_by_user_id, status, access_type, notes
-         )
-         VALUES ($1, $2, $3, $4, 'allowed', 'daily_pass', $5)
-         RETURNING id, checked_in_at, status, access_type`,
-        [clientId, membership?.id || null, paymentResult.rows[0].id, checkedInByUserId, notes]
-      );
-
-      return {
-        ...checkinResult.rows[0],
-        client,
-        membership,
-        payment: paymentResult.rows[0],
-        warning_message: membership?.effective_status === 'expired'
-          ? 'La membresia esta expirada. Se registro ingreso por pago diario.'
-          : null
-      };
+    const client = await resolveClientByCode(clientCode);
+    const result = await processAttendanceCheckin({
+      clientId: client.id,
+      checkedInByUserId,
+      accessType,
+      paymentMethod,
+      dailyPassAmount: request.body.daily_pass_amount,
+      notes
     });
 
     response.status(201).json({

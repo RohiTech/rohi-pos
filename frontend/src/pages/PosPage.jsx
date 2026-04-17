@@ -209,6 +209,7 @@ export function PosPage() {
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingInventory, setSavingInventory] = useState(false);
   const [savingSale, setSavingSale] = useState(false);
+  const [reprintingReceipt, setReprintingReceipt] = useState(false);
   const [savingCashMovement, setSavingCashMovement] = useState(false);
   const [closingCashRegister, setClosingCashRegister] = useState(false);
   const [exportingCashClosePdf, setExportingCashClosePdf] = useState(false);
@@ -696,7 +697,8 @@ export function PosPage() {
     }
   }
 
-  async function openSaleVoucherReport(sale) {
+  async function openSaleVoucherReport(sale, options = {}) {
+    const { autoPrint = false } = options;
     const saleId = Number(sale?.id);
     if (!Number.isInteger(saleId) || saleId <= 0) {
       return;
@@ -715,8 +717,38 @@ export function PosPage() {
 
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const voucherWindow = window.open(url, '_blank', 'noopener,noreferrer');
+
+    if (autoPrint && voucherWindow) {
+      window.setTimeout(() => {
+        try {
+          voucherWindow.focus();
+          voucherWindow.print();
+        } catch {
+          // If automatic print is blocked, the voucher remains open for manual print.
+        }
+      }, 900);
+    }
+
     window.setTimeout(() => window.URL.revokeObjectURL(url), 15000);
+  }
+
+  async function handleReprintReceipt() {
+    if (!editingReceiptId) {
+      return;
+    }
+
+    clearMessages();
+    setReprintingReceipt(true);
+
+    try {
+      await openSaleVoucherReport({ id: editingReceiptId }, { autoPrint: true });
+      notifySuccess(`Voucher del recibo #${editingReceiptId} enviado para reimpresion.`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible reimprimir el recibo');
+    } finally {
+      setReprintingReceipt(false);
+    }
   }
 
   function handleSaleItemChange(index, field, value) {
@@ -1784,7 +1816,15 @@ export function PosPage() {
                 </button>
 
                 {editingReceiptId ? (
-                  <div className="grid gap-2 md:grid-cols-2">
+                  <div className="grid gap-2 md:grid-cols-3">
+                    <button
+                      className="rounded-2xl border border-brand-moss bg-brand-moss/10 px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-brand-forest disabled:opacity-60"
+                      disabled={savingSale || reprintingReceipt}
+                      onClick={handleReprintReceipt}
+                      type="button"
+                    >
+                      {reprintingReceipt ? 'Reimprimiendo...' : 'Reimprimir recibo'}
+                    </button>
                     <button
                       className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-rose-700 disabled:opacity-60"
                       disabled={savingSale}
