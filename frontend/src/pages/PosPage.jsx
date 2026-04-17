@@ -143,6 +143,8 @@ export function PosPage() {
   const [productSearch, setProductSearch] = useState('');
   const [movementSearch, setMovementSearch] = useState('');
   const [saleSearch, setSaleSearch] = useState('');
+  const [saleDateFrom, setSaleDateFrom] = useState('');
+  const [saleDateTo, setSaleDateTo] = useState('');
   const [posSearch, setPosSearch] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [productPage, setProductPage] = useState(1);
@@ -233,11 +235,13 @@ export function PosPage() {
       apiGet(
         `/sales${buildQueryString({
           search: saleSearch.trim(),
+          sold_from: saleDateFrom,
+          sold_to: saleDateTo,
           page: salePage,
           limit: SALE_PAGE_SIZE
         })}`
       ),
-    [saleSearch, salePage, refreshKey]
+    [saleSearch, saleDateFrom, saleDateTo, salePage, refreshKey]
   );
   const cashCloseSummaryQuery = useApi(() => apiGet('/cash-register/current/summary'), [refreshKey]);
   const cashMovementsQuery = useApi(
@@ -367,7 +371,7 @@ export function PosPage() {
 
   useEffect(() => {
     setSalePage(1);
-  }, [saleSearch]);
+  }, [saleSearch, saleDateFrom, saleDateTo]);
 
   useEffect(() => {
     setCashMovementPage(1);
@@ -1345,7 +1349,7 @@ export function PosPage() {
           onClick={() => setActiveView('stats')}
           type="button"
         >
-          Ventas recientes
+          Editar ventas
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
@@ -2212,14 +2216,42 @@ export function PosPage() {
 
       {activeView === 'stats' ? (
         <div className="grid gap-6">
-          <DataPanel title="Ventas recientes" subtitle="Control rapido de caja y seguimiento del turno.">
-            <div className="mb-4">
+          <DataPanel title="Editar ventas" subtitle="Busca, filtra por fechas y abre recibos para edicion o anulacion.">
+            <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_13rem_13rem_auto] md:items-end">
               <input
                 className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                 onChange={(event) => setSaleSearch(event.target.value)}
                 placeholder="Buscar por numero, cliente, cajero o estado"
                 value={saleSearch}
               />
+              <label className="grid gap-1 text-sm font-semibold text-brand-forest">
+                Desde
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 font-normal"
+                  onChange={(event) => setSaleDateFrom(event.target.value)}
+                  type="date"
+                  value={saleDateFrom}
+                />
+              </label>
+              <label className="grid gap-1 text-sm font-semibold text-brand-forest">
+                Hasta
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 font-normal"
+                  onChange={(event) => setSaleDateTo(event.target.value)}
+                  type="date"
+                  value={saleDateTo}
+                />
+              </label>
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-brand-forest"
+                onClick={() => {
+                  setSaleDateFrom('');
+                  setSaleDateTo('');
+                }}
+                type="button"
+              >
+                Limpiar fechas
+              </button>
             </div>
 
             {salesQuery.loading ? <p className="text-sm text-brand-forest/70">Cargando ventas...</p> : null}

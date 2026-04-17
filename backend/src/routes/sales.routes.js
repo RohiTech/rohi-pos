@@ -12,6 +12,19 @@ import { validateCreateSalePayload, validateUpdateSaleReceiptPayload } from '../
 
 const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'card', 'transfer', 'mobile', 'other']);
 
+function parseDateFilter(value, fieldName) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    throw createHttpError(400, `${fieldName} must use format YYYY-MM-DD`);
+  }
+
+  return trimmed;
+}
+
 function parseNullablePositiveInteger(value, fieldName) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -154,25 +167,39 @@ async function getSaleById(saleId) {
 salesRouter.get('/', async (request, response, next) => {
   try {
     const search = String(request.query.search || '').trim();
+    const soldFrom = parseDateFilter(request.query.sold_from, 'sold_from');
+    const soldTo = parseDateFilter(request.query.sold_to, 'sold_to');
     const { page, limit, offset } = parsePaginationParams(request.query, {
       defaultLimit: 5,
       maxLimit: 100
     });
     const params = [];
-    let whereClause = '';
+    const whereConditions = [];
 
     if (search) {
       params.push(`%${search}%`);
-      whereClause = `
-        WHERE
-          s.sale_number ILIKE $1 OR
-          COALESCE(c.client_code, '') ILIKE $1 OR
-          COALESCE(c.first_name, '') ILIKE $1 OR
-          COALESCE(c.last_name, '') ILIKE $1 OR
-          u.username ILIKE $1 OR
-          s.status ILIKE $1
-      `;
+      const searchParamIndex = params.length;
+      whereConditions.push(`(
+        s.sale_number ILIKE $${searchParamIndex} OR
+        COALESCE(c.client_code, '') ILIKE $${searchParamIndex} OR
+        COALESCE(c.first_name, '') ILIKE $${searchParamIndex} OR
+        COALESCE(c.last_name, '') ILIKE $${searchParamIndex} OR
+        u.username ILIKE $${searchParamIndex} OR
+        s.status ILIKE $${searchParamIndex}
+      )`);
     }
+
+    if (soldFrom) {
+      params.push(soldFrom);
+      whereConditions.push(`s.sold_at::date >= $${params.length}::date`);
+    }
+
+    if (soldTo) {
+      params.push(soldTo);
+      whereConditions.push(`s.sold_at::date <= $${params.length}::date`);
+    }
+
+    const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
     const countResult = await query(
       `SELECT COUNT(*)::int AS total
