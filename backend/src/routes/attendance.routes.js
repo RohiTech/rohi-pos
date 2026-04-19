@@ -10,6 +10,7 @@ import { inferMembershipStatus } from '../utils/memberships.js';
 
 const attendanceRouter = Router();
 const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'card', 'transfer', 'mobile', 'other']);
+const CURRENT_OCCUPANCY_WINDOW_MINUTES = 120;
 
 function parsePositiveNumber(value, fieldName) {
   const parsed = Number(value);
@@ -310,7 +311,80 @@ attendanceRouter.get('/clients', async (request, response, next) => {
 attendanceRouter.get('/summary', async (_request, response, next) => {
   try {
     const result = await query(
-      `SELECT
+      `WITH daily_counts AS (
+         SELECT
+           day::date AS calendar_day,
+           COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS allowed_count
+         FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS day
+         LEFT JOIN checkins ch
+           ON ch.checked_in_at::date = day::date
+         GROUP BY day
+       ),
+       recent_unique_clients AS (
+         SELECT DISTINCT ON (ch.client_id)
+           ch.client_id,
+           ch.checked_in_at,
+           ch.status
+         FROM checkins ch
+         WHERE ch.status = 'allowed'
+           AND ch.checked_in_at >= NOW() - ($1::int * INTERVAL '1 minute')
+         ORDER BY ch.client_id, ch.checked_in_at DESC, ch.id DESC
+       ),
+       today_hourly AS (
+         SELECT
+           hours.hour_of_day,
+           COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS total_checkins
+         FROM generate_series(0, 23) AS hours(hour_of_day)
+         LEFT JOIN checkins ch
+           ON EXTRACT(HOUR FROM ch.checked_in_at) = hours.hour_of_day
+           AND ch.checked_in_at::date = CURRENT_DATE
+         GROUP BY hours.hour_of_day
+       ),
+       historical_days AS (
+         SELECT generate_series(
+           CURRENT_DATE - INTERVAL '28 days',
+           CURRENT_DATE - INTERVAL '1 day',
+           INTERVAL '1 day'
+         )::date AS calendar_day
+       ),
+       historical_hour_counts AS (
+         SELECT
+           ch.checked_in_at::date AS calendar_day,
+           EXTRACT(HOUR FROM ch.checked_in_at)::int AS hour_of_day,
+           COUNT(*)::int AS total_checkins
+         FROM checkins ch
+         WHERE ch.status = 'allowed'
+           AND ch.checked_in_at::date BETWEEN CURRENT_DATE - INTERVAL '28 days' AND CURRENT_DATE - INTERVAL '1 day'
+         GROUP BY 1, 2
+       ),
+       historical_hourly AS (
+         SELECT
+           hours.hour_of_day,
+           COALESCE(ROUND(AVG(COALESCE(historical_hour_counts.total_checkins, 0)), 1), 0)::numeric(10,1) AS average_checkins
+         FROM generate_series(0, 23) AS hours(hour_of_day)
+         CROSS JOIN historical_days
+         LEFT JOIN historical_hour_counts
+           ON historical_hour_counts.calendar_day = historical_days.calendar_day
+           AND historical_hour_counts.hour_of_day = hours.hour_of_day
+         GROUP BY hours.hour_of_day
+       ),
+       today_peak AS (
+         SELECT
+           hour_of_day,
+           total_checkins
+         FROM today_hourly
+         ORDER BY total_checkins DESC, hour_of_day DESC
+         LIMIT 1
+       ),
+       historical_peak AS (
+         SELECT
+           hour_of_day,
+           average_checkins
+         FROM historical_hourly
+         ORDER BY average_checkins DESC, hour_of_day DESC
+         LIMIT 1
+       )
+       SELECT
          COUNT(*) FILTER (WHERE checked_in_at::date = CURRENT_DATE)::int AS total_today,
          COUNT(*) FILTER (WHERE checked_in_at::date = CURRENT_DATE AND status = 'allowed')::int AS allowed_today,
          COUNT(*) FILTER (WHERE checked_in_at::date = CURRENT_DATE AND status = 'denied')::int AS denied_today,
@@ -320,13 +394,128 @@ attendanceRouter.get('/summary', async (_request, response, next) => {
            INNER JOIN payments p ON p.id = ch2.payment_id
            WHERE ch2.checked_in_at::date = CURRENT_DATE
              AND ch2.access_type = 'daily_pass'
-         ), 0)::numeric(12,2) AS daily_pass_income_today
-       FROM checkins`
+         ), 0)::numeric(12,2) AS daily_pass_income_today,
+         COALESCE((SELECT COUNT(*) FROM recent_unique_clients), 0)::int AS current_inside_estimate,
+         COALESCE((SELECT ROUND(AVG(allowed_count), 1) FROM daily_counts), 0)::numeric(10,1) AS average_daily_last_7_days,
+         (SELECT hour_of_day FROM today_peak)::int AS today_peak_hour,
+         (SELECT total_checkins FROM today_peak)::int AS today_peak_checkins,
+         (SELECT hour_of_day FROM historical_peak)::int AS historical_peak_hour,
+         (SELECT average_checkins FROM historical_peak)::numeric(10,1) AS historical_peak_average_checkins,
+         $1::int AS current_inside_window_minutes
+       FROM checkins`,
+      [CURRENT_OCCUPANCY_WINDOW_MINUTES]
     );
 
     response.json({
       ok: true,
       data: result.rows[0]
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+attendanceRouter.get('/trends', async (request, response, next) => {
+  try {
+    const days = Math.min(parsePositiveInteger(request.query.days) || 7, 30);
+
+    const dailySeriesResult = await query(
+      `WITH day_series AS (
+         SELECT generate_series(
+           CURRENT_DATE - (($1::int - 1) * INTERVAL '1 day'),
+           CURRENT_DATE,
+           INTERVAL '1 day'
+         )::date AS calendar_day
+       )
+       SELECT
+         day_series.calendar_day,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS total_checkins
+       FROM day_series
+       LEFT JOIN checkins ch
+         ON ch.checked_in_at::date = day_series.calendar_day
+       GROUP BY day_series.calendar_day
+       ORDER BY day_series.calendar_day ASC`,
+      [days]
+    );
+
+    const previousDailySeriesResult = await query(
+      `WITH day_series AS (
+         SELECT generate_series(
+           CURRENT_DATE - (($1::int * 2) * INTERVAL '1 day') + INTERVAL '1 day',
+           CURRENT_DATE - ($1::int * INTERVAL '1 day'),
+           INTERVAL '1 day'
+         )::date AS calendar_day
+       )
+       SELECT
+         day_series.calendar_day,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS total_checkins
+       FROM day_series
+       LEFT JOIN checkins ch
+         ON ch.checked_in_at::date = day_series.calendar_day
+       GROUP BY day_series.calendar_day
+       ORDER BY day_series.calendar_day ASC`,
+      [days]
+    );
+
+    const hourlySeriesResult = await query(
+      `WITH hour_series AS (
+         SELECT generate_series(0, 23) AS hour_of_day
+       ),
+       historical_days AS (
+         SELECT generate_series(
+           CURRENT_DATE - INTERVAL '28 days',
+           CURRENT_DATE - INTERVAL '1 day',
+           INTERVAL '1 day'
+         )::date AS calendar_day
+       ),
+       historical_hour_counts AS (
+         SELECT
+           ch.checked_in_at::date AS calendar_day,
+           EXTRACT(HOUR FROM ch.checked_in_at)::int AS hour_of_day,
+           COUNT(*)::int AS total_checkins
+         FROM checkins ch
+         WHERE ch.status = 'allowed'
+           AND ch.checked_in_at::date BETWEEN CURRENT_DATE - INTERVAL '28 days' AND CURRENT_DATE - INTERVAL '1 day'
+         GROUP BY 1, 2
+       )
+       SELECT
+         hour_series.hour_of_day,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed' AND ch.checked_in_at::date = CURRENT_DATE), 0)::int AS total_checkins,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed' AND ch.checked_in_at::date = CURRENT_DATE - INTERVAL '1 day'), 0)::int AS yesterday_checkins,
+         COALESCE((
+           SELECT ROUND(AVG(COALESCE(historical_hour_counts.total_checkins, 0)), 1)
+           FROM historical_days
+           LEFT JOIN historical_hour_counts
+             ON historical_hour_counts.calendar_day = historical_days.calendar_day
+             AND historical_hour_counts.hour_of_day = hour_series.hour_of_day
+         ), 0)::numeric(10,1) AS historical_average_checkins
+       FROM hour_series
+       LEFT JOIN checkins ch
+         ON EXTRACT(HOUR FROM ch.checked_in_at) = hour_series.hour_of_day
+         AND ch.checked_in_at::date IN (CURRENT_DATE, CURRENT_DATE - INTERVAL '1 day')
+       GROUP BY hour_series.hour_of_day
+       ORDER BY hour_series.hour_of_day ASC`
+    );
+
+    response.json({
+      ok: true,
+      data: {
+        days,
+        daily: dailySeriesResult.rows,
+        daily_previous: previousDailySeriesResult.rows,
+        hourly_today: hourlySeriesResult.rows.map((row) => ({
+          hour_of_day: row.hour_of_day,
+          total_checkins: row.total_checkins
+        })),
+        hourly_yesterday: hourlySeriesResult.rows.map((row) => ({
+          hour_of_day: row.hour_of_day,
+          total_checkins: row.yesterday_checkins
+        })),
+        hourly_historical_average: hourlySeriesResult.rows.map((row) => ({
+          hour_of_day: row.hour_of_day,
+          total_checkins: row.historical_average_checkins
+        }))
+      }
     });
   } catch (error) {
     next(error);

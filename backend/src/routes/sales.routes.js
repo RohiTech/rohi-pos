@@ -235,13 +235,45 @@ salesRouter.get('/', async (request, response, next) => {
 salesRouter.get('/summary', async (_request, response, next) => {
   try {
     const result = await query(
-      `SELECT
-         COUNT(*)::int AS total_sales,
-         COALESCE(SUM(total), 0)::numeric(12,2) AS total_revenue,
-         COALESCE(SUM(total) FILTER (WHERE sold_at::date = CURRENT_DATE), 0)::numeric(12,2) AS revenue_today,
-         COUNT(*) FILTER (WHERE sold_at::date = CURRENT_DATE)::int AS sales_today
-       FROM sales
-       WHERE status = 'completed'`
+      `WITH sales_totals AS (
+         SELECT
+           COUNT(*)::int AS total_sales,
+           COALESCE(SUM(total), 0)::numeric(12,2) AS total_revenue,
+           COALESCE(SUM(total) FILTER (WHERE sold_at::date = CURRENT_DATE), 0)::numeric(12,2) AS revenue_today,
+           COUNT(*) FILTER (WHERE sold_at::date = CURRENT_DATE)::int AS sales_today
+         FROM sales
+         WHERE status = 'completed'
+       ),
+       daily_pass_income AS (
+         SELECT
+           COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total_income,
+           COALESCE(SUM(p.amount) FILTER (WHERE ch.checked_in_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
+         FROM checkins ch
+         INNER JOIN payments p ON p.id = ch.payment_id
+         WHERE ch.access_type = 'daily_pass'
+           AND ch.status = 'allowed'
+       ),
+       memberships_income AS (
+         SELECT
+           COALESCE(SUM(m.amount_paid), 0)::numeric(12,2) AS total_income,
+           COALESCE(SUM(m.amount_paid) FILTER (WHERE m.created_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
+         FROM memberships m
+         WHERE COALESCE(m.amount_paid, 0) > 0
+       )
+       SELECT
+         st.total_sales,
+         st.total_revenue,
+         st.revenue_today,
+         st.sales_today,
+         dpi.income_today AS daily_pass_income_today,
+         dpi.total_income AS daily_pass_income_total,
+         mi.income_today AS memberships_income_today,
+         mi.total_income AS memberships_income_total,
+         (st.revenue_today + dpi.income_today + mi.income_today)::numeric(12,2) AS total_income_today,
+         (st.total_revenue + dpi.total_income + mi.total_income)::numeric(12,2) AS total_income
+       FROM sales_totals st
+       CROSS JOIN daily_pass_income dpi
+       CROSS JOIN memberships_income mi`
     );
 
     response.json({ ok: true, data: result.rows[0] });

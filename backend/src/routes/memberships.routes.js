@@ -23,6 +23,7 @@ const baseMembershipSelect = `
     c.client_code,
     c.first_name AS client_first_name,
     c.last_name AS client_last_name,
+    c.phone AS client_phone,
     m.plan_id,
     mp.name AS plan_name,
     mp.duration_days,

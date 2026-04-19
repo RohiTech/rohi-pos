@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -45,6 +46,8 @@ function addDays(dateValue, daysToAdd) {
 }
 
 export function MembershipsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [activeView, setActiveView] = useState('membership-list');
   const [planOptions, setPlanOptions] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -196,6 +199,35 @@ export function MembershipsPage() {
   useEffect(() => {
     loadMemberships();
   }, [membershipSearch, membershipPage]);
+
+  useEffect(() => {
+    if (!location.search || editingMembershipId) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    const renewClientId = params.get('renew_client_id');
+
+    if (!renewClientId || !clients.length) {
+      return;
+    }
+
+    const targetClient = clients.find((client) => String(client.id) === String(renewClientId));
+    if (!targetClient) {
+      return;
+    }
+
+    const defaultStartDate = formatDateInput(new Date());
+    setEditingMembershipId(null);
+    setActiveView('membership-form');
+    setMembershipForm((current) => ({
+      ...current,
+      client_id: String(targetClient.id),
+      start_date: current.start_date || defaultStartDate
+    }));
+    setClientSearch(`${targetClient.client_code} - ${targetClient.first_name} ${targetClient.last_name}`);
+    navigate('/memberships', { replace: true });
+  }, [clients, editingMembershipId, location.search, navigate]);
 
   useEffect(() => {
     setPlanPage(1);
