@@ -45,6 +45,15 @@ function addDays(dateValue, daysToAdd) {
   return formatDateInput(date);
 }
 
+function calculateAmountPaid(priceValue, discountValue) {
+  const price = Number(priceValue);
+  const discount = Number(discountValue);
+  const safePrice = Number.isFinite(price) ? price : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+  const amount = Math.max(safePrice - safeDiscount, 0);
+  return amount.toFixed(2);
+}
+
 export function MembershipsPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -258,11 +267,16 @@ export function MembershipsPage() {
 
         if (selectedPlan) {
           const startDate = current.start_date || formatDateInput(new Date());
+          const planPrice = String(selectedPlan.price ?? '');
           nextForm.start_date = startDate;
           nextForm.end_date = addDays(startDate, Number(selectedPlan.duration_days) - 1);
-          nextForm.price = String(selectedPlan.price ?? '');
+          nextForm.price = planPrice;
+          nextForm.discount = '0';
+          nextForm.amount_paid = calculateAmountPaid(planPrice, 0);
         } else {
           nextForm.price = '';
+          nextForm.discount = '';
+          nextForm.amount_paid = '';
         }
       }
 
@@ -272,6 +286,10 @@ export function MembershipsPage() {
         if (selectedPlan && value) {
           nextForm.end_date = addDays(value, Number(selectedPlan.duration_days) - 1);
         }
+      }
+
+      if (!editingMembershipId && (name === 'discount' || name === 'price')) {
+        nextForm.amount_paid = calculateAmountPaid(nextForm.price, nextForm.discount);
       }
 
       return nextForm;

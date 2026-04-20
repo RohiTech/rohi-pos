@@ -291,6 +291,29 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            AND p.membership_id IS NOT NULL
            AND p.paid_at::date BETWEEN $1 AND $2
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+
+         UNION ALL
+
+         SELECT
+           m.membership_number AS operation_number,
+           m.amount_paid AS total,
+           m.created_at AS operation_at,
+           m.sold_by_user_id AS cashier_user_id,
+           u.username AS cashier_username,
+           'completed'::text AS status,
+           NULL::bigint AS cash_register_session_id,
+           'membership'::text AS source_type
+         FROM memberships m
+         LEFT JOIN users u ON u.id = m.sold_by_user_id
+         WHERE $3::boolean = TRUE
+           AND m.amount_paid > 0
+           AND m.created_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR m.sold_by_user_id = $4::bigint)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM payments p2
+             WHERE p2.membership_id = m.id
+           )
        ),
        daily_pass_income AS (
          SELECT
@@ -486,6 +509,25 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
            AND p.membership_id IS NOT NULL
            AND p.paid_at::date BETWEEN $1 AND $2
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+
+         UNION ALL
+
+         SELECT
+           m.sold_by_user_id AS seller_user_id,
+           m.amount_paid AS total,
+           0::numeric(12,2) AS discount,
+           0::numeric(12,2) AS tax,
+           m.created_at AS operation_at
+         FROM memberships m
+         WHERE $3::boolean = TRUE
+           AND m.amount_paid > 0
+           AND m.created_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR m.sold_by_user_id = $4::bigint)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM payments p2
+             WHERE p2.membership_id = m.id
+           )
 
          UNION ALL
 
