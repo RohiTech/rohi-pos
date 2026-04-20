@@ -37,9 +37,9 @@ INSERT INTO membership_plans (
     price
 )
 VALUES
-    ('Weekly', '7-day access plan', 7, 10.00),
-    ('Monthly', '30-day access plan', 30, 35.00),
-    ('Quarterly', '90-day access plan', 90, 95.00)
+    ('Semanal', 'Plan de acceso de 7 dias', 7, 10.00),
+    ('Mensual', 'Plan de acceso de 30 dias', 30, 35.00),
+    ('Trimestral', 'Plan de acceso de 90 dias', 90, 95.00)
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO product_categories (name, description)

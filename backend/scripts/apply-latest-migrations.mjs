@@ -19,7 +19,8 @@ const dbSsl = process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : fa
 
 const migrationFiles = [
   '../database/sql/009_create_cash_movements.sql',
-  '../database/sql/010_add_sales_cancellation_tracking.sql'
+  '../database/sql/010_add_sales_cancellation_tracking.sql',
+  '../database/sql/011_translate_membership_plans_to_spanish.sql'
 ];
 
 const { Pool } = pg;

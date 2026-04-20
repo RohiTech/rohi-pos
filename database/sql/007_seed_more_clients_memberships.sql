@@ -76,14 +76,14 @@ SELECT
     seed.cancelled_at
 FROM (
     VALUES
-        ('CLI-0100', 'Monthly',     'MEM-0100', CURRENT_DATE - 10, CURRENT_DATE + 20, 'active',    0.00::numeric, 35.00::numeric, 'Membresia al dia y muy constante', NULL::timestamptz),
-        ('CLI-0101', 'Quarterly',   'MEM-0101', CURRENT_DATE - 40, CURRENT_DATE + 50, 'active',    5.00::numeric, 90.00::numeric, 'Pago con descuento corporativo', NULL::timestamptz),
+        ('CLI-0100', 'Mensual',     'MEM-0100', CURRENT_DATE - 10, CURRENT_DATE + 20, 'active',    0.00::numeric, 35.00::numeric, 'Membresia al dia y muy constante', NULL::timestamptz),
+        ('CLI-0101', 'Trimestral',  'MEM-0101', CURRENT_DATE - 40, CURRENT_DATE + 50, 'active',    5.00::numeric, 90.00::numeric, 'Pago con descuento corporativo', NULL::timestamptz),
         ('CLI-0102', 'Semanal',     'MEM-0102', CURRENT_DATE - 14, CURRENT_DATE - 7,  'expired',   0.00::numeric, 10.00::numeric, 'No renovo la ultima semana', NULL::timestamptz),
-        ('CLI-0103', 'Monthly',     'MEM-0103', CURRENT_DATE + 2,  CURRENT_DATE + 32, 'pending',   0.00::numeric, 15.00::numeric, 'Inicio programado para la proxima semana', NULL::timestamptz),
-        ('CLI-0104', 'Quarterly',   'MEM-0104', CURRENT_DATE - 27, CURRENT_DATE + 63, 'active',   10.00::numeric, 85.00::numeric, 'Promocion de temporada aplicada', NULL::timestamptz),
-        ('CLI-0105', 'Monthly',     'MEM-0105', CURRENT_DATE - 5,  CURRENT_DATE + 25, 'pending',   0.00::numeric, 10.00::numeric, 'Solo dejo adelanto en recepcion', NULL::timestamptz),
-        ('CLI-0106', 'Monthly',     'MEM-0106', CURRENT_DATE - 20, CURRENT_DATE + 10, 'cancelled', 0.00::numeric, 20.00::numeric, 'Cancelada por viaje prolongado', CURRENT_TIMESTAMP - INTERVAL '3 days'),
-        ('CLI-0107', 'Annual Plus', 'MEM-0107', CURRENT_DATE - 3,  CURRENT_DATE + 362,'active',   25.00::numeric, 274.99::numeric, 'Plan anual premium', NULL::timestamptz)
+        ('CLI-0103', 'Mensual',     'MEM-0103', CURRENT_DATE + 2,  CURRENT_DATE + 32, 'pending',   0.00::numeric, 15.00::numeric, 'Inicio programado para la proxima semana', NULL::timestamptz),
+        ('CLI-0104', 'Trimestral',  'MEM-0104', CURRENT_DATE - 27, CURRENT_DATE + 63, 'active',   10.00::numeric, 85.00::numeric, 'Promocion de temporada aplicada', NULL::timestamptz),
+        ('CLI-0105', 'Mensual',     'MEM-0105', CURRENT_DATE - 5,  CURRENT_DATE + 25, 'pending',   0.00::numeric, 10.00::numeric, 'Solo dejo adelanto en recepcion', NULL::timestamptz),
+        ('CLI-0106', 'Mensual',     'MEM-0106', CURRENT_DATE - 20, CURRENT_DATE + 10, 'cancelled', 0.00::numeric, 20.00::numeric, 'Cancelada por viaje prolongado', CURRENT_TIMESTAMP - INTERVAL '3 days'),
+        ('CLI-0107', 'Anual Plus',  'MEM-0107', CURRENT_DATE - 3,  CURRENT_DATE + 362,'active',   25.00::numeric, 274.99::numeric, 'Plan anual premium', NULL::timestamptz)
 ) AS seed(client_code, plan_name, membership_number, start_date, end_date, status, discount, amount_paid, notes, cancelled_at)
 INNER JOIN target_clients c
     ON c.client_code = seed.client_code
