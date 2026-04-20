@@ -308,29 +308,32 @@ export function AttendanceKioskPage() {
           : undefined
       }
     >
-      <div className="mx-auto max-w-3xl rounded-[2rem] border border-brand-sand/70 bg-white p-6 shadow-panel lg:p-8">
+      <div className="relative mx-auto max-w-3xl rounded-[2rem] border border-white/45 bg-white/30 p-6 shadow-panel backdrop-blur-[4px] lg:p-8">
+        <button
+          aria-label="Salir del modo kiosco"
+          className="absolute right-4 top-4 rounded-xl border border-brand-sand px-3 py-1 text-lg font-bold leading-none text-brand-forest"
+          onClick={openUnlockModal}
+          type="button"
+        >
+          X
+        </button>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="flex items-start gap-4">
             {kioskLogo ? (
               <img
                 alt="Logo empresa"
-                className="mb-3 h-12 w-12 rounded-xl border border-brand-sand/60 object-contain"
+                className="h-20 w-28 rounded-2xl border border-brand-sand/60 bg-white/35 p-2 object-contain"
                 src={kioskLogo}
               />
             ) : null}
-            <p className="text-xs uppercase tracking-[0.2em] text-brand-moss">Modo kiosco</p>
-            <h1 className="mt-1 text-3xl font-semibold text-brand-forest">Marcar asistencia</h1>
-            <p className="mt-2 text-sm text-brand-forest/70">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-brand-moss">Modo kiosco</p>
+              <h1 className="mt-1 text-3xl font-semibold text-brand-forest">Marcar asistencia</h1>
+              <p className="mt-2 text-sm text-brand-forest/70">
               Pantalla exclusiva para check-in por QR o codigo de cliente. {companyName}
-            </p>
+              </p>
+            </div>
           </div>
-          <button
-            className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest"
-            onClick={openUnlockModal}
-            type="button"
-          >
-            Volver al modulo completo
-          </button>
         </div>
 
         {error ? (
