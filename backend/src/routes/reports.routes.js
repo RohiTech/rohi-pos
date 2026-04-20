@@ -254,40 +254,77 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       return res.status(400).json({ message: 'cash_register_session_id debe ser un entero positivo' });
     }
 
-    const conditions = ['s.sold_at::date BETWEEN $1 AND $2'];
-    const sqlParams = [startDate, endDate];
-
-    if (saleStatus) {
-      sqlParams.push(saleStatus);
-      conditions.push(`s.status = $${sqlParams.length}`);
-    } else {
-      conditions.push("s.status = 'completed'");
-    }
-
-    if (cashierUserId) {
-      sqlParams.push(cashierUserId);
-      conditions.push(`s.cashier_user_id = $${sqlParams.length}`);
-    }
-
-    if (cashSessionId) {
-      sqlParams.push(cashSessionId);
-      conditions.push(`s.cash_register_session_id = $${sqlParams.length}`);
-    }
+    const includeAdditionalIncome = (!saleStatus || saleStatus === 'completed') && !cashSessionId;
 
     const { rows } = await query(
-      `SELECT
-         s.sale_number,
-         s.total,
-         s.sold_at,
-         s.cashier_user_id,
-         u.username AS cashier_username,
-         s.status,
-         s.cash_register_session_id
-       FROM sales s
-       LEFT JOIN users u ON u.id = s.cashier_user_id
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY s.sold_at DESC`,
-      sqlParams
+      `WITH pos_sales AS (
+         SELECT
+           s.sale_number AS operation_number,
+           s.total,
+           s.sold_at AS operation_at,
+           s.cashier_user_id,
+           u.username AS cashier_username,
+           s.status,
+           s.cash_register_session_id,
+           'pos'::text AS source_type
+         FROM sales s
+         LEFT JOIN users u ON u.id = s.cashier_user_id
+         WHERE s.sold_at::date BETWEEN $1 AND $2
+           AND ($5::text IS NULL OR s.status = $5::text)
+           AND ($5::text IS NOT NULL OR s.status = 'completed')
+           AND ($4::bigint IS NULL OR s.cashier_user_id = $4::bigint)
+           AND ($6::bigint IS NULL OR s.cash_register_session_id = $6::bigint)
+       ),
+       memberships_income AS (
+         SELECT
+           p.payment_number AS operation_number,
+           p.amount AS total,
+           p.paid_at AS operation_at,
+           p.received_by_user_id AS cashier_user_id,
+           u.username AS cashier_username,
+           'completed'::text AS status,
+           NULL::bigint AS cash_register_session_id,
+           'membership'::text AS source_type
+         FROM payments p
+         LEFT JOIN users u ON u.id = p.received_by_user_id
+         WHERE $3::boolean = TRUE
+           AND p.membership_id IS NOT NULL
+           AND p.paid_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+       ),
+       daily_pass_income AS (
+         SELECT
+           p.payment_number AS operation_number,
+           p.amount AS total,
+           p.paid_at AS operation_at,
+           p.received_by_user_id AS cashier_user_id,
+           u.username AS cashier_username,
+           'completed'::text AS status,
+           NULL::bigint AS cash_register_session_id,
+           'daily_pass'::text AS source_type
+         FROM payments p
+         INNER JOIN checkins ch ON ch.payment_id = p.id
+         LEFT JOIN users u ON u.id = p.received_by_user_id
+         WHERE $3::boolean = TRUE
+           AND ch.access_type = 'daily_pass'
+           AND ch.status = 'allowed'
+           AND p.paid_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+       )
+       SELECT * FROM pos_sales
+       UNION ALL
+       SELECT * FROM memberships_income
+       UNION ALL
+       SELECT * FROM daily_pass_income
+       ORDER BY operation_at DESC`,
+      [
+        startDate,
+        endDate,
+        includeAdditionalIncome,
+        cashierUserId,
+        saleStatus || null,
+        cashSessionId
+      ]
     );
 
     // Datos de usuario autenticado
@@ -327,19 +364,25 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     } else {
       // Titulos de columna alineados
       const startY = doc.y;
-      doc.font('Helvetica-Bold');
-      doc.text('N° Venta', 20, startY, { width: 100, align: 'left' });
-      doc.text('Total (C$)', 120, startY, { width: 100, align: 'right' });
-      doc.text('Hora', 230, startY, { width: 100, align: 'center' });
-      doc.text('Cajero', 330, startY, { width: 100, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(10);
+      doc.text('N° Venta', 20, startY, { width: 220, align: 'left' });
+      doc.text('Total (C$)', 250, startY, { width: 90, align: 'right' });
+      doc.text('Hora', 350, startY, { width: 90, align: 'center' });
+      doc.text('Cajero', 450, startY, { width: 90, align: 'center' });
       doc.moveDown(1);
-      doc.font('Helvetica');
+      doc.font('Helvetica').fontSize(10);
       rows.forEach(row => {
         const y = doc.y;
-        doc.text(row.sale_number, 20, y, { width: 100, align: 'left' });
-        doc.text(`C$${Number(row.total).toFixed(2)}`, 120, y, { width: 100, align: 'right' });
-        doc.text(new Date(row.sold_at).toLocaleTimeString(), 230, y, { width: 100, align: 'center' });
-        doc.text(row.cashier_username || String(row.cashier_user_id), 330, y, { width: 100, align: 'center' });
+        const sourceLabel =
+          row.source_type === 'membership'
+            ? 'Membresia'
+            : row.source_type === 'daily_pass'
+              ? 'Rutina diaria'
+              : 'POS';
+        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 220, align: 'left' });
+        doc.text(`C$${Number(row.total).toFixed(2)}`, 250, y, { width: 90, align: 'right' });
+        doc.text(new Date(row.operation_at).toLocaleTimeString(), 350, y, { width: 90, align: 'center' });
+        doc.text(row.cashier_username || String(row.cashier_user_id), 450, y, { width: 90, align: 'center' });
         doc.moveDown(0.5);
       });
       doc.moveDown(1);
@@ -413,47 +456,79 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
       return res.status(400).json({ message: 'cash_register_session_id debe ser un entero positivo' });
     }
 
-    const conditions = ['s.sold_at::date BETWEEN $1 AND $2'];
-    const sqlParams = [startDate, endDate];
-
-    if (saleStatus) {
-      sqlParams.push(saleStatus);
-      conditions.push(`s.status = $${sqlParams.length}`);
-    } else {
-      conditions.push("s.status = 'completed'");
-    }
-
-    if (sellerUserId) {
-      sqlParams.push(sellerUserId);
-      conditions.push(`s.cashier_user_id = $${sqlParams.length}`);
-    }
-
-    if (cashSessionId) {
-      sqlParams.push(cashSessionId);
-      conditions.push(`s.cash_register_session_id = $${sqlParams.length}`);
-    }
+    const includeAdditionalIncome = (!saleStatus || saleStatus === 'completed') && !cashSessionId;
 
     const { rows } = await query(
-      `SELECT
-         s.cashier_user_id AS seller_user_id,
+      `WITH operations AS (
+         SELECT
+           s.cashier_user_id AS seller_user_id,
+           s.total,
+           s.discount,
+           s.tax,
+           s.sold_at AS operation_at
+         FROM sales s
+         WHERE s.sold_at::date BETWEEN $1 AND $2
+           AND ($5::text IS NULL OR s.status = $5::text)
+           AND ($5::text IS NOT NULL OR s.status = 'completed')
+           AND ($4::bigint IS NULL OR s.cashier_user_id = $4::bigint)
+           AND ($6::bigint IS NULL OR s.cash_register_session_id = $6::bigint)
+
+         UNION ALL
+
+         SELECT
+           p.received_by_user_id AS seller_user_id,
+           p.amount AS total,
+           0::numeric(12,2) AS discount,
+           0::numeric(12,2) AS tax,
+           p.paid_at AS operation_at
+         FROM payments p
+         WHERE $3::boolean = TRUE
+           AND p.membership_id IS NOT NULL
+           AND p.paid_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+
+         UNION ALL
+
+         SELECT
+           p.received_by_user_id AS seller_user_id,
+           p.amount AS total,
+           0::numeric(12,2) AS discount,
+           0::numeric(12,2) AS tax,
+           p.paid_at AS operation_at
+         FROM payments p
+         INNER JOIN checkins ch ON ch.payment_id = p.id
+         WHERE $3::boolean = TRUE
+           AND ch.access_type = 'daily_pass'
+           AND ch.status = 'allowed'
+           AND p.paid_at::date BETWEEN $1 AND $2
+           AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+       )
+       SELECT
+         operations.seller_user_id,
          COALESCE(
            NULLIF(u.username, ''),
            NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''),
-           CONCAT('Usuario #', s.cashier_user_id)
+           CONCAT('Usuario #', operations.seller_user_id)
          ) AS seller_name,
          COUNT(*)::int AS total_sales,
-         COALESCE(SUM(s.total), 0)::numeric(12,2) AS total_amount,
-         COALESCE(SUM(s.discount), 0)::numeric(12,2) AS total_discount,
-         COALESCE(SUM(s.tax), 0)::numeric(12,2) AS total_tax,
-         COALESCE(AVG(s.total), 0)::numeric(12,2) AS average_ticket,
-         MIN(s.sold_at) AS first_sale_at,
-         MAX(s.sold_at) AS last_sale_at
-       FROM sales s
-       LEFT JOIN users u ON u.id = s.cashier_user_id
-       WHERE ${conditions.join(' AND ')}
-       GROUP BY s.cashier_user_id, seller_name
+         COALESCE(SUM(operations.total), 0)::numeric(12,2) AS total_amount,
+         COALESCE(SUM(operations.discount), 0)::numeric(12,2) AS total_discount,
+         COALESCE(SUM(operations.tax), 0)::numeric(12,2) AS total_tax,
+         COALESCE(AVG(operations.total), 0)::numeric(12,2) AS average_ticket,
+         MIN(operations.operation_at) AS first_sale_at,
+         MAX(operations.operation_at) AS last_sale_at
+       FROM operations
+       LEFT JOIN users u ON u.id = operations.seller_user_id
+       GROUP BY operations.seller_user_id, seller_name
        ORDER BY total_amount DESC, seller_name ASC`,
-      sqlParams
+      [
+        startDate,
+        endDate,
+        includeAdditionalIncome,
+        sellerUserId,
+        saleStatus || null,
+        cashSessionId
+      ]
     );
 
     const usuario = req.user?.username || req.user?.email || 'Desconocido';
@@ -2995,8 +3070,24 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
       sqlParams
     );
 
+    const extraIncomeResult = await query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS membership_income,
+         COALESCE(SUM(CASE WHEN ch.access_type = 'daily_pass' AND ch.status = 'allowed' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS daily_pass_income,
+         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL OR (ch.access_type = 'daily_pass' AND ch.status = 'allowed') THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_extra_income
+       FROM payments p
+       LEFT JOIN checkins ch ON ch.payment_id = p.id
+       WHERE p.paid_at::date BETWEEN $1 AND $2`,
+      [fechaInicio, fechaFin]
+    );
+
     const rows = result.rows;
     const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const extraIncome = extraIncomeResult.rows[0] || {
+      membership_income: 0,
+      daily_pass_income: 0,
+      total_extra_income: 0
+    };
 
     const totals = rows.reduce(
       (acc, row) => {
@@ -3016,7 +3107,10 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
         totalCard: 0,
         totalTransfer: 0,
         totalMobile: 0,
-        totalOther: 0
+        totalOther: 0,
+        membershipIncome: Number(extraIncome.membership_income || 0),
+        dailyPassIncome: Number(extraIncome.daily_pass_income || 0),
+        totalExtraIncome: Number(extraIncome.total_extra_income || 0)
       }
     );
 
@@ -3046,6 +3140,9 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
     doc.font('Helvetica').fontSize(10);
     doc.text(
       `Pagos - Efectivo: C$${totals.totalCash.toFixed(2)} | Tarjeta: C$${totals.totalCard.toFixed(2)} | Transferencia: C$${totals.totalTransfer.toFixed(2)} | Movil: C$${totals.totalMobile.toFixed(2)} | Otros: C$${totals.totalOther.toFixed(2)}`
+    );
+    doc.text(
+      `Ingresos adicionales - Membresias: C$${totals.membershipIncome.toFixed(2)} | Rutina diaria: C$${totals.dailyPassIncome.toFixed(2)} | Total adicional: C$${totals.totalExtraIncome.toFixed(2)}`
     );
     doc.moveDown();
 
