@@ -11,6 +11,7 @@ import { inferMembershipStatus } from '../utils/memberships.js';
 const attendanceRouter = Router();
 const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'card', 'transfer', 'mobile', 'other']);
 const CURRENT_OCCUPANCY_WINDOW_MINUTES = 120;
+const DAILY_CHECKIN_BLOCK_MESSAGE = 'Ya registraste tu asistencia hoy. ¡Te esperamos mañana! 💪';
 
 function parsePositiveNumber(value, fieldName) {
   const parsed = Number(value);
@@ -132,6 +133,22 @@ async function getLatestMembershipForClient(clientId, dbClient = null) {
   };
 }
 
+async function ensureClientCanCheckInToday(clientId, dbClient = null) {
+  const executor = dbClient || { query };
+  const result = await executor.query(
+    `SELECT id
+     FROM checkins
+     WHERE client_id = $1
+       AND checked_in_at::date = CURRENT_DATE
+     LIMIT 1`,
+    [clientId]
+  );
+
+  if (result.rowCount > 0) {
+    throw createHttpError(409, DAILY_CHECKIN_BLOCK_MESSAGE);
+  }
+}
+
 async function processAttendanceCheckin({
   clientId,
   checkedInByUserId,
@@ -146,6 +163,7 @@ async function processAttendanceCheckin({
   const settings = await getSystemSettings();
 
   return withTransaction(async (dbClient) => {
+    await ensureClientCanCheckInToday(clientId, dbClient);
     const membership = await getLatestMembershipForClient(clientId, dbClient);
 
     if (accessType === 'membership') {

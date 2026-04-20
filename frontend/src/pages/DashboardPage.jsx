@@ -593,7 +593,7 @@ export function DashboardPage() {
         />
       </section>
 
-      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <MetricCard
           label="Hora pico hoy"
           value={todayPeakHour !== null ? formatHourLabel(todayPeakHour) : '--'}
@@ -610,11 +610,6 @@ export function DashboardPage() {
           value={membershipsSummary?.data?.active_memberships ?? '--'}
           hint={`${membershipsSummary?.data?.pending_memberships ?? 0} pendientes`}
           accent="clay"
-        />
-        <MetricCard
-          label="Total de ingresos"
-          value={formatCurrency(salesSummary?.data?.total_income ?? salesSummary?.data?.total_revenue ?? 0)}
-          hint={`POS ${formatCurrency(salesSummary?.data?.total_revenue ?? 0)} · Membresias ${formatCurrency(salesSummary?.data?.memberships_income_total ?? 0)} · Rutina dia ${formatCurrency(salesSummary?.data?.daily_pass_income_total ?? 0)}`}
         />
       </section>
 

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiPost } from '../lib/api';
 
@@ -37,6 +37,7 @@ function parseQrPayload(rawValue) {
 }
 
 export function AttendanceKioskPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const scannerInstanceId = useId().replace(/:/g, '');
   const scannerElementId = `attendance-kiosk-qr-scanner-${scannerInstanceId}`;
@@ -54,6 +55,64 @@ export function AttendanceKioskPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [lastCheckin, setLastCheckin] = useState(null);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockError, setUnlockError] = useState('');
+
+  function openUnlockModal() {
+    setUnlockModalOpen(true);
+    setUnlockError('');
+    setAdminUsername('');
+    setAdminPassword('');
+  }
+
+  function closeUnlockModal() {
+    if (unlockLoading) {
+      return;
+    }
+
+    setUnlockModalOpen(false);
+    setUnlockError('');
+    setAdminUsername('');
+    setAdminPassword('');
+  }
+
+  async function handleUnlockKiosk(event) {
+    event.preventDefault();
+
+    const normalizedUsername = String(adminUsername || '').trim();
+    const normalizedPassword = String(adminPassword || '');
+
+    if (!normalizedUsername || !normalizedPassword) {
+      setUnlockError('Ingresa usuario y clave de administrador.');
+      return;
+    }
+
+    setUnlockLoading(true);
+    setUnlockError('');
+
+    try {
+      const response = await apiPost('/auth/login', {
+        username: normalizedUsername,
+        password: normalizedPassword
+      });
+      const roleName = String(response?.data?.user?.role_name || '').toLowerCase();
+
+      if (roleName !== 'admin') {
+        setUnlockError('El usuario no tiene permisos de administrador.');
+        return;
+      }
+
+      closeUnlockModal();
+      navigate('/attendance');
+    } catch (_error) {
+      setUnlockError('Clave de administrador invalida.');
+    } finally {
+      setUnlockLoading(false);
+    }
+  }
 
   async function stopScanner() {
     const scanner = scannerRef.current;
@@ -241,12 +300,13 @@ export function AttendanceKioskPage() {
               Pantalla exclusiva para check-in por QR o codigo de cliente.
             </p>
           </div>
-          <Link
+          <button
             className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest"
-            to="/attendance"
+            onClick={openUnlockModal}
+            type="button"
           >
             Volver al modulo completo
-          </Link>
+          </button>
         </div>
 
         {error ? (
@@ -327,6 +387,63 @@ export function AttendanceKioskPage() {
             </div>
           )}
         </section>
+
+        {unlockModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-brand-sand/70 bg-white p-5 shadow-panel">
+              <h2 className="text-xl font-semibold text-brand-forest">Salida protegida</h2>
+              <p className="mt-2 text-sm text-brand-forest/70">
+                Ingresa credenciales de administrador para salir del modo kiosco.
+              </p>
+
+              <form className="mt-4 grid gap-3" onSubmit={handleUnlockKiosk}>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Usuario admin</span>
+                  <input
+                    autoComplete="username"
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    onChange={(event) => setAdminUsername(event.target.value)}
+                    placeholder="Ej: admin"
+                    value={adminUsername}
+                  />
+                </label>
+
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Clave admin</span>
+                  <input
+                    autoComplete="current-password"
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    onChange={(event) => setAdminPassword(event.target.value)}
+                    placeholder="Ingresa la clave"
+                    type="password"
+                    value={adminPassword}
+                  />
+                </label>
+
+                {unlockError ? (
+                  <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{unlockError}</p>
+                ) : null}
+
+                <div className="mt-1 flex justify-end gap-2">
+                  <button
+                    className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest"
+                    onClick={closeUnlockModal}
+                    type="button"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="rounded-2xl bg-brand-moss px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    disabled={unlockLoading}
+                    type="submit"
+                  >
+                    {unlockLoading ? 'Validando...' : 'Confirmar salida'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
