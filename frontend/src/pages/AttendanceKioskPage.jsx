@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { apiPost } from '../lib/api';
 
 const SCAN_COOLDOWN_MS = 3000;
@@ -39,6 +40,7 @@ function parseQrPayload(rawValue) {
 export function AttendanceKioskPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { settings } = useSettings();
   const scannerInstanceId = useId().replace(/:/g, '');
   const scannerElementId = `attendance-kiosk-qr-scanner-${scannerInstanceId}`;
   const scannerRef = useRef(null);
@@ -289,15 +291,37 @@ export function AttendanceKioskPage() {
     };
   }, [scannerEnabled, scannerElementId]);
 
+  const companyName = settings.company_name || 'RohiPOS';
+  const kioskLogo = settings.kiosk_logo_data_url || settings.company_logo_data_url || null;
+  const kioskBackground = settings.kiosk_background_data_url || null;
+
   return (
-    <div className="min-h-screen bg-brand-cream p-4 lg:p-8">
+    <div
+      className="min-h-screen bg-brand-cream p-4 lg:p-8"
+      style={
+        kioskBackground
+          ? {
+              backgroundImage: `linear-gradient(rgba(248,245,236,0.84), rgba(248,245,236,0.9)), url(${kioskBackground})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center'
+            }
+          : undefined
+      }
+    >
       <div className="mx-auto max-w-3xl rounded-[2rem] border border-brand-sand/70 bg-white p-6 shadow-panel lg:p-8">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
+            {kioskLogo ? (
+              <img
+                alt="Logo empresa"
+                className="mb-3 h-12 w-12 rounded-xl border border-brand-sand/60 object-contain"
+                src={kioskLogo}
+              />
+            ) : null}
             <p className="text-xs uppercase tracking-[0.2em] text-brand-moss">Modo kiosco</p>
             <h1 className="mt-1 text-3xl font-semibold text-brand-forest">Marcar asistencia</h1>
             <p className="mt-2 text-sm text-brand-forest/70">
-              Pantalla exclusiva para check-in por QR o codigo de cliente.
+              Pantalla exclusiva para check-in por QR o codigo de cliente. {companyName}
             </p>
           </div>
           <button

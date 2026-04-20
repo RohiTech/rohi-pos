@@ -2430,6 +2430,488 @@ function latestMembershipLabel(planName, status) {
   return `${planName} (${status})`;
 }
 
+reportsRouter.get('/attendance-daily/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `SELECT
+         day_series.calendar_day,
+         COALESCE(COUNT(ch.id), 0)::int AS total_checkins,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS allowed_checkins,
+         COALESCE(COUNT(ch.id) FILTER (WHERE ch.status = 'denied'), 0)::int AS denied_checkins,
+         COALESCE(COUNT(DISTINCT ch.client_id) FILTER (WHERE ch.status = 'allowed'), 0)::int AS unique_clients
+       FROM generate_series($1::date, $2::date, INTERVAL '1 day') AS day_series(calendar_day)
+       LEFT JOIN checkins ch
+         ON ch.checked_in_at::date = day_series.calendar_day::date
+       GROUP BY day_series.calendar_day
+       ORDER BY day_series.calendar_day ASC`,
+      [startDate, endDate]
+    );
+
+    const rows = result.rows;
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.total += Number(row.total_checkins || 0);
+        acc.allowed += Number(row.allowed_checkins || 0);
+        acc.denied += Number(row.denied_checkins || 0);
+        return acc;
+      },
+      { total: 0, allowed: 0, denied: 0 }
+    );
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="asistencias_diarias.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Asistencias Diarias', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(
+      `Totales: ${totals.total} registros | Permitidos: ${totals.allowed} | Denegados: ${totals.denied}`,
+      20
+    );
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.text('No hay asistencias registradas en el rango de fechas seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(10);
+      doc.text('Fecha', 20, headerY, { width: 140, align: 'left' });
+      doc.text('Total', 170, headerY, { width: 70, align: 'right' });
+      doc.text('Permitidos', 250, headerY, { width: 90, align: 'right' });
+      doc.text('Denegados', 350, headerY, { width: 90, align: 'right' });
+      doc.text('Clientes unicos', 450, headerY, { width: 100, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(10);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(new Date(row.calendar_day).toLocaleDateString('es-NI'), 20, y, {
+          width: 140,
+          align: 'left'
+        });
+        doc.text(String(row.total_checkins || 0), 170, y, { width: 70, align: 'right' });
+        doc.text(String(row.allowed_checkins || 0), 250, y, { width: 90, align: 'right' });
+        doc.text(String(row.denied_checkins || 0), 350, y, { width: 90, align: 'right' });
+        doc.text(String(row.unique_clients || 0), 450, y, { width: 100, align: 'right' });
+        doc.moveDown(0.6);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Asistencias Diarias', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/attendance-by-client/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, search, status } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const normalizedSearch = String(search || '').trim();
+    const normalizedStatus = String(status || '').trim();
+    if (normalizedStatus && !['allowed', 'denied'].includes(normalizedStatus)) {
+      return res.status(400).json({ message: "status debe ser 'allowed' o 'denied'" });
+    }
+
+    const conditions = ['ch.checked_in_at::date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (normalizedSearch) {
+      sqlParams.push(`%${normalizedSearch}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (normalizedStatus) {
+      sqlParams.push(normalizedStatus);
+      conditions.push(`ch.status = $${sqlParams.length}`);
+    }
+
+    const result = await query(
+      `SELECT
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         COUNT(ch.id)::int AS total_checkins,
+         COUNT(ch.id) FILTER (WHERE ch.status = 'allowed')::int AS allowed_checkins,
+         COUNT(ch.id) FILTER (WHERE ch.status = 'denied')::int AS denied_checkins,
+         MAX(ch.checked_in_at) AS last_checkin_at
+       FROM checkins ch
+       INNER JOIN clients c ON c.id = ch.client_id
+       WHERE ${conditions.join(' AND ')}
+       GROUP BY c.client_code, c.first_name, c.last_name
+       ORDER BY total_checkins DESC, last_checkin_at DESC
+       LIMIT 400`,
+      sqlParams
+    );
+
+    const rows = result.rows;
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.total += Number(row.total_checkins || 0);
+        acc.allowed += Number(row.allowed_checkins || 0);
+        acc.denied += Number(row.denied_checkins || 0);
+        return acc;
+      },
+      { total: 0, allowed: 0, denied: 0 }
+    );
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="asistencias_por_cliente.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Asistencias por Cliente', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(
+      `Totales: ${totals.total} registros | Permitidos: ${totals.allowed} | Denegados: ${totals.denied}`,
+      20
+    );
+    doc.text(`Filtro de busqueda: ${normalizedSearch || 'Ninguno'} | Estado: ${normalizedStatus || 'Todos'}`, 20);
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.text('No hay registros para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 220, align: 'left' });
+      doc.text('Total', 250, headerY, { width: 55, align: 'right' });
+      doc.text('Permit.', 315, headerY, { width: 55, align: 'right' });
+      doc.text('Deneg.', 380, headerY, { width: 55, align: 'right' });
+      doc.text('Ultimo registro', 445, headerY, { width: 105, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const fullName = `${row.first_name || ''} ${row.last_name || ''}`.trim();
+        const clientLabel = `${row.client_code || '--'} - ${fullName || 'Sin nombre'}`;
+        doc.text(clientLabel, 20, y, { width: 220, align: 'left' });
+        doc.text(String(row.total_checkins || 0), 250, y, { width: 55, align: 'right' });
+        doc.text(String(row.allowed_checkins || 0), 315, y, { width: 55, align: 'right' });
+        doc.text(String(row.denied_checkins || 0), 380, y, { width: 55, align: 'right' });
+        doc.text(
+          row.last_checkin_at
+            ? new Date(row.last_checkin_at).toLocaleString('es-NI')
+            : '--',
+          445,
+          y,
+          { width: 105, align: 'right' }
+        );
+        doc.moveDown(0.6);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Asistencias por Cliente', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/attendance-client-detail/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, search, status, access_type } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const normalizedSearch = String(search || '').trim();
+    const normalizedStatus = String(status || '').trim();
+    if (normalizedStatus && !['allowed', 'denied'].includes(normalizedStatus)) {
+      return res.status(400).json({ message: "status debe ser 'allowed' o 'denied'" });
+    }
+
+    const normalizedAccessType = String(access_type || '').trim();
+    if (normalizedAccessType && !['membership', 'daily_pass'].includes(normalizedAccessType)) {
+      return res.status(400).json({ message: "access_type debe ser 'membership' o 'daily_pass'" });
+    }
+
+    const conditions = ['ch.checked_in_at::date BETWEEN $1 AND $2'];
+    const sqlParams = [startDate, endDate];
+
+    if (normalizedSearch) {
+      sqlParams.push(`%${normalizedSearch}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (normalizedStatus) {
+      sqlParams.push(normalizedStatus);
+      conditions.push(`ch.status = $${sqlParams.length}`);
+    }
+
+    if (normalizedAccessType) {
+      sqlParams.push(normalizedAccessType);
+      conditions.push(`ch.access_type = $${sqlParams.length}`);
+    }
+
+    const result = await query(
+      `SELECT
+         ch.checked_in_at,
+         ch.status,
+         ch.access_type,
+         ch.notes,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         COALESCE(u.username, u.email, 'sistema') AS checked_by
+       FROM checkins ch
+       INNER JOIN clients c ON c.id = ch.client_id
+       LEFT JOIN users u ON u.id = ch.checked_in_by_user_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.first_name ASC, c.last_name ASC, ch.checked_in_at DESC
+       LIMIT 1200`,
+      sqlParams
+    );
+
+    const rows = result.rows;
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.total += 1;
+        if (row.status === 'allowed') {
+          acc.allowed += 1;
+        }
+        if (row.status === 'denied') {
+          acc.denied += 1;
+        }
+        return acc;
+      },
+      { total: 0, allowed: 0, denied: 0 }
+    );
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 32, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="detalle_marcaciones_clientes.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(17).text('Detalle de Marcaciones por Cliente', { align: 'center' });
+    doc.moveDown(0.7);
+    doc.fontSize(11).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(
+      `Totales: ${totals.total} registros | Permitidos: ${totals.allowed} | Denegados: ${totals.denied}`,
+      20
+    );
+    doc.text(
+      `Busqueda: ${normalizedSearch || 'Ninguna'} | Estado: ${normalizedStatus || 'Todos'} | Acceso: ${normalizedAccessType || 'Todos'}`,
+      20
+    );
+    doc.moveDown();
+
+    if (rows.length === 0) {
+      doc.text('No hay marcaciones para los filtros seleccionados.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(8.5);
+      doc.text('Fecha/Hora', 20, headerY, { width: 90, align: 'left' });
+      doc.text('Cliente', 112, headerY, { width: 170, align: 'left' });
+      doc.text('Estado', 284, headerY, { width: 54, align: 'left' });
+      doc.text('Acceso', 340, headerY, { width: 66, align: 'left' });
+      doc.text('Usuario', 408, headerY, { width: 64, align: 'left' });
+      doc.text('Notas', 474, headerY, { width: 95, align: 'left' });
+      doc.moveDown(0.9);
+
+      doc.font('Helvetica').fontSize(8.5);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const fullName = `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Sin nombre';
+        const clientLabel = `${row.client_code || '--'} - ${fullName}`;
+        const statusLabel = row.status === 'allowed' ? 'Permitido' : 'Denegado';
+        const accessLabel = row.access_type === 'membership' ? 'Membresia' : 'Pase diario';
+
+        doc.text(
+          row.checked_in_at ? new Date(row.checked_in_at).toLocaleString('es-NI') : '--',
+          20,
+          y,
+          { width: 90, align: 'left' }
+        );
+        doc.text(clientLabel, 112, y, { width: 170, align: 'left' });
+        doc.text(statusLabel, 284, y, { width: 54, align: 'left' });
+        doc.text(accessLabel, 340, y, { width: 66, align: 'left' });
+        doc.text(String(row.checked_by || '--'), 408, y, { width: 64, align: 'left' });
+        doc.text(String(row.notes || '--'), 474, y, { width: 95, align: 'left' });
+        doc.moveDown(0.8);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 86;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 32, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 32, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 32, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Detalle de Marcaciones por Cliente', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 112, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/operational-stats/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio);
+    const endDate = String(fechaFin);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH checkin_summary AS (
+         SELECT
+           COUNT(*)::int AS total_checkins,
+           COUNT(*) FILTER (WHERE status = 'allowed')::int AS allowed_checkins,
+           COUNT(*) FILTER (WHERE status = 'denied')::int AS denied_checkins,
+           COUNT(DISTINCT client_id) FILTER (WHERE status = 'allowed')::int AS unique_clients
+         FROM checkins
+         WHERE checked_in_at::date BETWEEN $1 AND $2
+       ),
+       sales_summary AS (
+         SELECT
+           COUNT(*)::int AS total_sales,
+           COALESCE(SUM(total), 0)::numeric(12,2) AS sales_amount
+         FROM sales
+         WHERE sold_at::date BETWEEN $1 AND $2
+           AND status = 'completed'
+       )
+       SELECT
+         checkin_summary.total_checkins,
+         checkin_summary.allowed_checkins,
+         checkin_summary.denied_checkins,
+         checkin_summary.unique_clients,
+         sales_summary.total_sales,
+         sales_summary.sales_amount
+       FROM checkin_summary
+       CROSS JOIN sales_summary`,
+      [startDate, endDate]
+    );
+
+    const stats = result.rows[0] || {
+      total_checkins: 0,
+      allowed_checkins: 0,
+      denied_checkins: 0,
+      unique_clients: 0,
+      total_sales: 0,
+      sales_amount: 0
+    };
+    const totalSales = Number(stats.total_sales || 0);
+    const salesAmount = Number(stats.sales_amount || 0);
+    const avgTicket = totalSales > 0 ? salesAmount / totalSales : 0;
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="estadisticas_operativas.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Estadisticas Operativas', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Asistencias', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Total registros: ${Number(stats.total_checkins || 0)}`, 30);
+    doc.text(`Permitidos: ${Number(stats.allowed_checkins || 0)}`, 30);
+    doc.text(`Denegados: ${Number(stats.denied_checkins || 0)}`, 30);
+    doc.text(`Clientes unicos con ingreso: ${Number(stats.unique_clients || 0)}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Ventas', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Ventas completadas: ${totalSales}`, 30);
+    doc.text(`Monto vendido: C$${salesAmount.toFixed(2)}`, 30);
+    doc.text(`Ticket promedio: C$${avgTicket.toFixed(2)}`, 30);
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Estadisticas Operativas', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/cash-sessions/options', async (_req, res, next) => {
   try {
     const result = await query(

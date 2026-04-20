@@ -6,6 +6,43 @@ import { createHttpError } from '../utils/http.js';
 
 const authRouter = Router();
 
+authRouter.get('/branding', async (_request, response, next) => {
+  try {
+    const result = await query(
+      `SELECT setting_key, setting_value
+       FROM system_settings
+       WHERE setting_key = ANY($1)
+       ORDER BY setting_key ASC`,
+      [[
+        'company_name',
+        'company_legal_name',
+        'company_motto',
+        'company_logo_data_url',
+        'login_background_data_url',
+        'kiosk_logo_data_url',
+        'kiosk_background_data_url'
+      ]]
+    );
+
+    const settings = Object.fromEntries(result.rows.map((row) => [row.setting_key, row.setting_value]));
+
+    response.json({
+      ok: true,
+      data: {
+        company_name: settings.company_name || 'RohiPOS',
+        company_legal_name: settings.company_legal_name || '',
+        company_motto: settings.company_motto || '',
+        company_logo_data_url: settings.company_logo_data_url || null,
+        login_background_data_url: settings.login_background_data_url || null,
+        kiosk_logo_data_url: settings.kiosk_logo_data_url || null,
+        kiosk_background_data_url: settings.kiosk_background_data_url || null
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 authRouter.post('/login', async (request, response, next) => {
   try {
     const usernameOrEmail = String(request.body.username || request.body.email || '').trim();

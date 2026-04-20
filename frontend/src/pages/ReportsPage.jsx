@@ -29,6 +29,16 @@ const reportModules = [
       'Movimientos de inventario',
       'Kardex de producto'
     ]
+  },
+  {
+    title: 'Asistencias',
+    description: 'Análisis de check-ins por día y por cliente.',
+    items: ['Asistencias diarias', 'Asistencias por cliente', 'Detalle de marcaciones por cliente']
+  },
+  {
+    title: 'Estadísticas',
+    description: 'KPIs operativos para tomar decisiones rápidas.',
+    items: ['Estadísticas operativas']
   }
 ];
 
@@ -57,6 +67,10 @@ export function ReportsPage() {
   const [openLowStockModal, setOpenLowStockModal] = useState(false);
   const [openInventoryMovementsModal, setOpenInventoryMovementsModal] = useState(false);
   const [openProductKardexModal, setOpenProductKardexModal] = useState(false);
+  const [openAttendanceDailyModal, setOpenAttendanceDailyModal] = useState(false);
+  const [openAttendanceByClientModal, setOpenAttendanceByClientModal] = useState(false);
+  const [openAttendanceClientDetailModal, setOpenAttendanceClientDetailModal] = useState(false);
+  const [openOperationalStatsModal, setOpenOperationalStatsModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: getTodayDateString(),
     fechaFin: getTodayDateString(),
@@ -164,6 +178,27 @@ export function ReportsPage() {
   });
   const [productKardexParams, setProductKardexParams] = useState({
     productId: '',
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString()
+  });
+  const [attendanceDailyParams, setAttendanceDailyParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString()
+  });
+  const [attendanceByClientParams, setAttendanceByClientParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    search: '',
+    status: ''
+  });
+  const [attendanceClientDetailParams, setAttendanceClientDetailParams] = useState({
+    fechaInicio: getTodayDateString(),
+    fechaFin: getTodayDateString(),
+    search: '',
+    status: '',
+    accessType: ''
+  });
+  const [operationalStatsParams, setOperationalStatsParams] = useState({
     fechaInicio: getTodayDateString(),
     fechaFin: getTodayDateString()
   });
@@ -395,6 +430,14 @@ export function ReportsPage() {
   const handleCloseInventoryMovements = () => setOpenInventoryMovementsModal(false);
   const handleOpenProductKardex = () => setOpenProductKardexModal(true);
   const handleCloseProductKardex = () => setOpenProductKardexModal(false);
+  const handleOpenAttendanceDaily = () => setOpenAttendanceDailyModal(true);
+  const handleCloseAttendanceDaily = () => setOpenAttendanceDailyModal(false);
+  const handleOpenAttendanceByClient = () => setOpenAttendanceByClientModal(true);
+  const handleCloseAttendanceByClient = () => setOpenAttendanceByClientModal(false);
+  const handleOpenAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(true);
+  const handleCloseAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(false);
+  const handleOpenOperationalStats = () => setOpenOperationalStatsModal(true);
+  const handleCloseOperationalStats = () => setOpenOperationalStatsModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -517,6 +560,26 @@ export function ReportsPage() {
       ...prev,
       [name]: value
     }));
+  };
+
+  const handleAttendanceDailyParamsChange = (e) => {
+    const { name, value } = e.target;
+    setAttendanceDailyParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleAttendanceByClientParamsChange = (e) => {
+    const { name, value } = e.target;
+    setAttendanceByClientParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleAttendanceClientDetailParamsChange = (e) => {
+    const { name, value } = e.target;
+    setAttendanceClientDetailParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleOperationalStatsParamsChange = (e) => {
+    const { name, value } = e.target;
+    setOperationalStatsParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -1079,6 +1142,139 @@ export function ReportsPage() {
     setOpenProductKardexModal(false);
   };
 
+  const handleAttendanceDailyReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: attendanceDailyParams.fechaInicio,
+      fechaFin: attendanceDailyParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/attendance-daily/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'asistencias_diarias.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenAttendanceDailyModal(false);
+  };
+
+  const handleAttendanceByClientReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: attendanceByClientParams.fechaInicio,
+      fechaFin: attendanceByClientParams.fechaFin,
+      search: attendanceByClientParams.search.trim(),
+      status: attendanceByClientParams.status
+    });
+
+    fetch(`http://localhost:3001/api/reports/attendance-by-client/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'asistencias_por_cliente.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenAttendanceByClientModal(false);
+  };
+
+  const handleAttendanceClientDetailReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: attendanceClientDetailParams.fechaInicio,
+      fechaFin: attendanceClientDetailParams.fechaFin,
+      search: attendanceClientDetailParams.search.trim(),
+      status: attendanceClientDetailParams.status,
+      access_type: attendanceClientDetailParams.accessType
+    });
+
+    fetch(`http://localhost:3001/api/reports/attendance-client-detail/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'detalle_marcaciones_clientes.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenAttendanceClientDetailModal(false);
+  };
+
+  const handleOperationalStatsReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: operationalStatsParams.fechaInicio,
+      fechaFin: operationalStatsParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/operational-stats/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'estadisticas_operativas.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenOperationalStatsModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -1205,6 +1401,34 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
+                  ) : report === 'Asistencias diarias' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenAttendanceDaily}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Asistencias por cliente' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenAttendanceByClient}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Detalle de marcaciones por cliente' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenAttendanceClientDetail}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Estadísticas operativas' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenOperationalStats}
+                    >
+                      {report}
+                    </button>
                   ) : (
                     <p className="font-semibold text-brand-forest">{report}</p>
                   )}
@@ -1214,6 +1438,211 @@ export function ReportsPage() {
           </DataPanel>
         ))}
       </div>
+
+      <SimpleModal open={openAttendanceDailyModal} onClose={handleCloseAttendanceDaily}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de asistencias diarias</h2>
+        <form onSubmit={handleAttendanceDailyReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={attendanceDailyParams.fechaInicio}
+              onChange={handleAttendanceDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={attendanceDailyParams.fechaFin}
+              onChange={handleAttendanceDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseAttendanceDaily} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openAttendanceByClientModal} onClose={handleCloseAttendanceByClient}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de asistencias por cliente</h2>
+        <form onSubmit={handleAttendanceByClientReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={attendanceByClientParams.fechaInicio}
+              onChange={handleAttendanceByClientParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={attendanceByClientParams.fechaFin}
+              onChange={handleAttendanceByClientParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={attendanceByClientParams.search}
+              onChange={handleAttendanceByClientParamsChange}
+              placeholder="Código, nombre o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="status"
+              value={attendanceByClientParams.status}
+              onChange={handleAttendanceByClientParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="allowed">Permitidos</option>
+              <option value="denied">Denegados</option>
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseAttendanceByClient} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openAttendanceClientDetailModal} onClose={handleCloseAttendanceClientDetail}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del detalle de marcaciones por cliente</h2>
+        <form onSubmit={handleAttendanceClientDetailReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={attendanceClientDetailParams.fechaInicio}
+              onChange={handleAttendanceClientDetailParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={attendanceClientDetailParams.fechaFin}
+              onChange={handleAttendanceClientDetailParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={attendanceClientDetailParams.search}
+              onChange={handleAttendanceClientDetailParamsChange}
+              placeholder="Código, nombre o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Estado (opcional)</span>
+            <select
+              name="status"
+              value={attendanceClientDetailParams.status}
+              onChange={handleAttendanceClientDetailParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="allowed">Permitidos</option>
+              <option value="denied">Denegados</option>
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Tipo de acceso (opcional)</span>
+            <select
+              name="accessType"
+              value={attendanceClientDetailParams.accessType}
+              onChange={handleAttendanceClientDetailParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos</option>
+              <option value="membership">Membresía</option>
+              <option value="daily_pass">Pase diario</option>
+            </select>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseAttendanceClientDetail} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openOperationalStatsModal} onClose={handleCloseOperationalStats}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de estadísticas operativas</h2>
+        <form onSubmit={handleOperationalStatsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={operationalStatsParams.fechaInicio}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={operationalStatsParams.fechaFin}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseOperationalStats} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
 
       <SimpleModal open={openDailySalesModal} onClose={handleCloseDailySales}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas diarias</h2>

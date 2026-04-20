@@ -1,17 +1,48 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
-import { apiGet, apiPut } from '../lib/api';
+import { apiGet, apiPut, apiPutForm } from '../lib/api';
 import { setCurrencyFormatterOptions } from '../lib/format';
 
 const SettingsContext = createContext(null);
+const DEFAULT_SETTINGS = {
+  currency_code: 'NIO',
+  membership_expiry_alert_days: 3,
+  routine_price: 0,
+  company_name: 'RohiPOS',
+  company_motto: '',
+  company_ruc: '',
+  company_phone: '',
+  company_email: '',
+  company_address: '',
+  company_legal_name: '',
+  company_logo_data_url: null,
+  login_background_data_url: null,
+  kiosk_logo_data_url: null,
+  kiosk_background_data_url: null
+};
+
+function normalizeSettings(raw = {}) {
+  return {
+    currency_code: raw.currency_code || 'NIO',
+    membership_expiry_alert_days: Number(raw.membership_expiry_alert_days || 3),
+    routine_price: Number(raw.routine_price || 0),
+    company_name: raw.company_name || 'RohiPOS',
+    company_motto: raw.company_motto || '',
+    company_ruc: raw.company_ruc || '',
+    company_phone: raw.company_phone || '',
+    company_email: raw.company_email || '',
+    company_address: raw.company_address || '',
+    company_legal_name: raw.company_legal_name || '',
+    company_logo_data_url: raw.company_logo_data_url || null,
+    login_background_data_url: raw.login_background_data_url || null,
+    kiosk_logo_data_url: raw.kiosk_logo_data_url || null,
+    kiosk_background_data_url: raw.kiosk_background_data_url || null
+  };
+}
 
 export function SettingsProvider({ children }) {
   const { isAuthenticated } = useAuth();
-  const [settings, setSettings] = useState({
-    currency_code: 'NIO',
-    membership_expiry_alert_days: 3,
-    routine_price: 0
-  });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -24,7 +55,7 @@ export function SettingsProvider({ children }) {
   useEffect(() => {
     async function loadSettings() {
       if (!isAuthenticated) {
-        setSettings({ currency_code: 'NIO', membership_expiry_alert_days: 3, routine_price: 0 });
+        setSettings(DEFAULT_SETTINGS);
         setLoading(false);
         return;
       }
@@ -33,13 +64,9 @@ export function SettingsProvider({ children }) {
 
       try {
         const response = await apiGet('/settings');
-        setSettings({
-          currency_code: response.data.currency_code || 'NIO',
-          membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3),
-          routine_price: Number(response.data.routine_price || 0)
-        });
+        setSettings(normalizeSettings(response.data));
       } catch (_error) {
-        setSettings({ currency_code: 'NIO', membership_expiry_alert_days: 3, routine_price: 0 });
+        setSettings(DEFAULT_SETTINGS);
       } finally {
         setLoading(false);
       }
@@ -50,11 +77,13 @@ export function SettingsProvider({ children }) {
 
   async function updateSettings(nextSettings) {
     const response = await apiPut('/settings', nextSettings);
-    setSettings({
-      currency_code: response.data.currency_code || 'NIO',
-      membership_expiry_alert_days: Number(response.data.membership_expiry_alert_days || 3),
-      routine_price: Number(response.data.routine_price || 0)
-    });
+    setSettings(normalizeSettings(response.data));
+    return response.data;
+  }
+
+  async function updateBranding(formData) {
+    const response = await apiPutForm('/settings/branding', formData);
+    setSettings(normalizeSettings(response.data));
     return response.data;
   }
 
@@ -62,7 +91,8 @@ export function SettingsProvider({ children }) {
     () => ({
       settings,
       loading,
-      updateSettings
+      updateSettings,
+      updateBranding
     }),
     [loading, settings]
   );
