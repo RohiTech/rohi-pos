@@ -37,10 +37,48 @@ function parseQrPayload(rawValue) {
   return rawText;
 }
 
+function normalizeMessage(message) {
+  return String(message || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function translateAttendanceErrorMessage(message) {
+  const normalizedMessage = normalizeMessage(message);
+
+  if (normalizedMessage.includes('client code not found')) {
+    return 'Codigo de cliente no encontrado.';
+  }
+
+  return String(message || '');
+}
+
+function shouldClearClientCodeOnError(message) {
+  const normalizedMessage = normalizeMessage(message);
+
+  return (
+    isDuplicateAttendanceMessage(normalizedMessage) ||
+    normalizedMessage.includes('client code not found')
+  );
+}
+
+function isDuplicateAttendanceMessage(message) {
+  const normalizedMessage = normalizeMessage(message);
+
+  return (
+    normalizedMessage.includes('ya marco asistencia') ||
+    normalizedMessage.includes('ya registro asistencia') ||
+    (normalizedMessage.includes('ya registraste') && normalizedMessage.includes('asistencia')) ||
+    (normalizedMessage.includes('ya marco') && normalizedMessage.includes('asistencia'))
+  );
+}
+
 export function AttendanceKioskPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { settings } = useSettings();
+  const clientCodeInputRef = useRef(null);
   const scannerInstanceId = useId().replace(/:/g, '');
   const scannerElementId = `attendance-kiosk-qr-scanner-${scannerInstanceId}`;
   const scannerRef = useRef(null);
@@ -62,6 +100,13 @@ export function AttendanceKioskPage() {
   const [adminPassword, setAdminPassword] = useState('');
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState('');
+  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
+
+  function focusClientCodeInput() {
+    requestAnimationFrame(() => {
+      clientCodeInputRef.current?.focus();
+    });
+  }
 
   function openUnlockModal() {
     setUnlockModalOpen(true);
@@ -179,9 +224,16 @@ export function AttendanceKioskPage() {
     try {
       await submitCheckin(clientCode, 'Check-in por codigo de cliente');
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible registrar asistencia');
+      const originalMessage = requestError.message || 'No fue posible registrar asistencia';
+      const errorMessage = translateAttendanceErrorMessage(originalMessage);
+      setError(errorMessage);
+
+      if (shouldClearClientCodeOnError(originalMessage)) {
+        setClientCode('');
+      }
     } finally {
       setSaving(false);
+      focusClientCodeInput();
     }
   }
 
@@ -213,13 +265,33 @@ export function AttendanceKioskPage() {
       await submitCheckin(parsedValue, 'Check-in por escaneo QR');
       setScanInfo('Ingreso registrado por QR.');
     } catch (requestError) {
-      const errorMessage = requestError.message || 'No fue posible procesar el QR';
+      const originalMessage = requestError.message || 'No fue posible procesar el QR';
+      const errorMessage = translateAttendanceErrorMessage(originalMessage);
       setError(errorMessage);
       setScanInfo(errorMessage);
+
+      if (shouldClearClientCodeOnError(originalMessage)) {
+        setClientCode('');
+      }
     } finally {
       scanLockRef.current = false;
+      focusClientCodeInput();
     }
   }
+
+  useEffect(() => {
+    focusClientCodeInput();
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!scannerEnabled) {
@@ -294,6 +366,19 @@ export function AttendanceKioskPage() {
   const companyName = settings.company_name || 'RohiPOS';
   const kioskLogo = settings.kiosk_logo_data_url || settings.company_logo_data_url || null;
   const kioskBackground = settings.kiosk_background_data_url || null;
+  const currentDate = currentDateTime.toLocaleDateString('es-NI', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+  const currentTime = currentDateTime
+    .toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    })
+    .toLowerCase();
 
   return (
     <div
@@ -330,7 +415,10 @@ export function AttendanceKioskPage() {
               <p className="text-xs uppercase tracking-[0.2em] text-brand-moss">Modo kiosco</p>
               <h1 className="mt-1 text-3xl font-semibold text-brand-forest">Marcar asistencia</h1>
               <p className="mt-2 text-sm text-brand-forest/70">
-              Pantalla exclusiva para check-in por QR o codigo de cliente. {companyName}
+              Pantalla exclusiva para check-in por codigo de cliente. {companyName}
+              </p>
+              <p className="mt-2 text-sm font-semibold text-brand-forest/85">
+                Fecha: {currentDate} | Hora: {currentTime}
               </p>
             </div>
           </div>
@@ -349,6 +437,7 @@ export function AttendanceKioskPage() {
           <label className="grid gap-2">
             <span className="text-sm font-semibold text-brand-forest">Codigo de cliente</span>
             <input
+              ref={clientCodeInputRef}
               className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 text-lg"
               onChange={(event) => setClientCode(event.target.value)}
               placeholder="Ej: CLI-0101"
@@ -364,41 +453,6 @@ export function AttendanceKioskPage() {
             {saving ? 'Procesando...' : 'Marcar asistencia'}
           </button>
         </form>
-
-        <section className="mt-6 rounded-2xl border border-brand-sand/70 bg-brand-cream/30 p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-brand-forest">Escaneo QR</h2>
-            <button
-              className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest"
-              onClick={() => setScannerEnabled((current) => !current)}
-              type="button"
-            >
-              {scannerEnabled ? 'Desactivar camara' : 'Activar camara'}
-            </button>
-          </div>
-
-          {cameraError ? <p className="mb-3 text-sm text-rose-700">{cameraError}</p> : null}
-          {scanInfo ? <p className="mb-3 text-sm text-brand-forest/80">{scanInfo}</p> : null}
-          {lastQrValue ? <p className="mb-3 text-xs text-brand-forest/70">Ultimo QR: {lastQrValue}</p> : null}
-
-          <div
-            className={`overflow-hidden rounded-2xl border border-dashed border-brand-sand bg-white ${
-              scannerEnabled ? 'min-h-[260px]' : 'min-h-[120px]'
-            }`}
-          >
-            {scannerEnabled ? (
-              <div id={scannerElementId} className="h-full w-full p-3" />
-            ) : (
-              <div className="flex h-full items-center justify-center p-4 text-sm text-brand-forest/70">
-                Activa la camara para leer codigos QR.
-              </div>
-            )}
-          </div>
-
-          {scannerEnabled && !scannerReady ? (
-            <p className="mt-3 text-xs text-brand-forest/70">Iniciando lector...</p>
-          ) : null}
-        </section>
 
         <section className="mt-6 rounded-2xl border border-brand-sand/70 p-4">
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-moss">Ultimo registro</h2>
