@@ -148,6 +148,8 @@ export function validateCreateProductPayload(payload) {
     description: normalizeNullableString(payload.description),
     sale_price: normalizeNonNegativeNumber(payload.sale_price, 'sale_price', true),
     cost_price: normalizeNonNegativeNumber(payload.cost_price, 'cost_price', false) ?? 0,
+    tax_name: normalizeNullableString(payload.tax_name) || 'Exento',
+    tax_rate: normalizeNonNegativeNumber(payload.tax_rate, 'tax_rate', false) ?? 0,
     stock_quantity: normalizeNonNegativeNumber(payload.stock_quantity, 'stock_quantity', false) ?? 0,
     minimum_stock: normalizeNonNegativeNumber(payload.minimum_stock, 'minimum_stock', false) ?? 0,
     unit_label: normalizeNullableString(payload.unit_label) || 'unit',
@@ -184,6 +186,18 @@ export function validateUpdateProductPayload(payload) {
 
   if ('cost_price' in payload) {
     updates.cost_price = normalizeNonNegativeNumber(payload.cost_price, 'cost_price', true);
+  }
+
+  if ('tax_name' in payload) {
+    updates.tax_name = normalizeNullableString(payload.tax_name);
+
+    if (!updates.tax_name) {
+      throw createHttpError(400, 'tax_name cannot be empty');
+    }
+  }
+
+  if ('tax_rate' in payload) {
+    updates.tax_rate = normalizeNonNegativeNumber(payload.tax_rate, 'tax_rate', true);
   }
 
   if ('stock_quantity' in payload) {

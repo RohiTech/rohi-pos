@@ -19,6 +19,7 @@ const SETTINGS_KEYS = [
   'time_zone',
   'membership_expiry_alert_days',
   'routine_price',
+  'tax_options',
   'company_name',
   'company_motto',
   'company_ruc',
@@ -37,6 +38,7 @@ const SETTINGS_DESCRIPTIONS = {
   time_zone: 'Zona horaria oficial del gimnasio para reportes y operaciones',
   membership_expiry_alert_days: 'Dias de anticipacion para avisar vencimiento de membresia',
   routine_price: 'Precio configurado para la rutina',
+  tax_options: 'Listado de impuestos disponibles para productos en formato JSON',
   company_name: 'Nombre comercial de la empresa',
   company_motto: 'Lema de la empresa',
   company_ruc: 'RUC de la empresa',
@@ -63,11 +65,38 @@ function mapSettingsResponse(settings) {
   const requestedTimeZone = String(settings.time_zone || '').trim();
   const timeZone = isValidTimeZone(requestedTimeZone) ? requestedTimeZone : DEFAULT_TIME_ZONE;
 
+  let taxOptions = [
+    { name: 'Exento', rate: 0 },
+    { name: 'IVA', rate: 15 }
+  ];
+
+  try {
+    const parsed = JSON.parse(String(settings.tax_options || '[]'));
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      taxOptions = parsed
+        .map((item) => ({
+          name: String(item?.name || '').trim(),
+          rate: Number(item?.rate)
+        }))
+        .filter((item) => item.name && Number.isFinite(item.rate) && item.rate >= 0 && item.rate <= 100);
+    }
+  } catch (_error) {
+    // Keep default tax options when stored value is invalid JSON.
+  }
+
+  if (!taxOptions.length) {
+    taxOptions = [
+      { name: 'Exento', rate: 0 },
+      { name: 'IVA', rate: 15 }
+    ];
+  }
+
   return {
     currency_code: settings.currency_code || SYSTEM_CURRENCY,
     time_zone: timeZone,
     membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3),
     routine_price: Number(settings.routine_price || 0),
+    tax_options: taxOptions,
     company_name: settings.company_name || 'RohiPOS',
     company_motto: settings.company_motto || '',
     company_ruc: settings.company_ruc || '',
@@ -129,6 +158,14 @@ settingsRouter.put('/', async (request, response, next) => {
     const companyAddress = String(request.body.company_address || '').trim();
     const companyLegalName = String(request.body.company_legal_name || '').trim();
     const timeZone = String(request.body.time_zone || DEFAULT_TIME_ZONE).trim();
+    const rawTaxOptions = Array.isArray(request.body.tax_options) ? request.body.tax_options : [];
+
+    const taxOptions = rawTaxOptions
+      .map((item) => ({
+        name: String(item?.name || '').trim(),
+        rate: Number(item?.rate)
+      }))
+      .filter((item) => item.name && Number.isFinite(item.rate));
 
     if (!Number.isInteger(alertDays) || alertDays < 0 || alertDays > 30) {
       throw createHttpError(400, 'membership_expiry_alert_days must be between 0 and 30');
@@ -170,10 +207,23 @@ settingsRouter.put('/', async (request, response, next) => {
       throw createHttpError(400, 'time_zone is invalid');
     }
 
+    if (!taxOptions.length) {
+      throw createHttpError(400, 'tax_options must include at least one option');
+    }
+
+    if (
+      taxOptions.some(
+        (item) => item.name.length > 60 || item.rate < 0 || item.rate > 100
+      )
+    ) {
+      throw createHttpError(400, 'tax_options contains invalid values');
+    }
+
     await upsertSetting('currency_code', SYSTEM_CURRENCY);
     await upsertSetting('time_zone', timeZone);
     await upsertSetting('membership_expiry_alert_days', String(alertDays));
     await upsertSetting('routine_price', String(routinePrice));
+    await upsertSetting('tax_options', JSON.stringify(taxOptions));
     await upsertSetting('company_name', companyName);
     await upsertSetting('company_motto', companyMotto);
     await upsertSetting('company_ruc', companyRuc);

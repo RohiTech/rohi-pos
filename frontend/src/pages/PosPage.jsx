@@ -3,6 +3,7 @@ import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 import { useApi } from '../hooks/useApi';
 import { apiGet, apiPost, apiPostForm, apiPut, apiPutForm, authToken, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -45,6 +46,8 @@ const initialProductForm = {
   description: '',
   sale_price: '',
   cost_price: '',
+  tax_name: 'Exento',
+  tax_rate: '0',
   stock_quantity: '',
   minimum_stock: '',
   unit_label: 'unidad',
@@ -136,6 +139,7 @@ function getCategoryTone(index) {
 
 export function PosPage() {
   const { user } = useAuth();
+  const { settings } = useSettings();
   const [activeView, setActiveView] = useState('sales');
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState('');
@@ -453,6 +457,8 @@ export function PosPage() {
       description: product.description || '',
       sale_price: String(product.sale_price || ''),
       cost_price: String(product.cost_price || ''),
+      tax_name: product.tax_name || 'Exento',
+      tax_rate: String(Number(product.tax_rate || 0)),
       stock_quantity: String(product.stock_quantity || ''),
       minimum_stock: String(product.minimum_stock || ''),
       unit_label: product.unit_label || 'unidad',
@@ -804,6 +810,8 @@ export function PosPage() {
         'cost_price',
         String(productForm.cost_price === '' ? 0 : Number(productForm.cost_price))
       );
+      formData.set('tax_name', String(productForm.tax_name || 'Exento'));
+      formData.set('tax_rate', String(productForm.tax_rate === '' ? 0 : Number(productForm.tax_rate)));
       formData.set(
         'stock_quantity',
         String(productForm.stock_quantity === '' ? 0 : Number(productForm.stock_quantity))
@@ -1178,6 +1186,55 @@ export function PosPage() {
   const tenderedAmount = Number(amountTendered || 0);
   const changeDue = Math.max(tenderedAmount - ticketTotal, 0);
   const balanceDue = Math.max(ticketTotal - tenderedAmount, 0);
+  const productSalePrice = productForm.sale_price === '' ? 0 : Number(productForm.sale_price);
+  const selectedProductTaxRate = productForm.tax_rate === '' ? 0 : Number(productForm.tax_rate);
+  const productProfitMargin =
+    productSalePrice -
+    (productForm.cost_price === '' ? 0 : Number(productForm.cost_price));
+  const productPriceWithTax = productSalePrice + productSalePrice * (selectedProductTaxRate / 100);
+  const baseTaxOptions =
+    Array.isArray(settings?.tax_options) && settings.tax_options.length > 0
+      ? settings.tax_options
+      : [
+          { name: 'Exento', rate: 0 },
+          { name: 'IVA', rate: 15 }
+        ];
+  const selectedTaxValue = `${productForm.tax_name || 'Exento'}|${String(
+    Number(productForm.tax_rate || 0)
+  )}`;
+  const configuredTaxOptions =
+    baseTaxOptions.some((option) => `${String(option?.name || '').trim()}|${Number(option?.rate || 0)}` === selectedTaxValue)
+      ? baseTaxOptions
+      : [
+          ...baseTaxOptions,
+          {
+            name: productForm.tax_name || 'Exento',
+            rate: Number(productForm.tax_rate || 0)
+          }
+        ];
+
+  function handleProductTaxChange(event) {
+    const selectedValue = String(event.target.value || 'Exento|0');
+    const separatorIndex = selectedValue.lastIndexOf('|');
+
+    if (separatorIndex < 0) {
+      setProductForm((current) => ({
+        ...current,
+        tax_name: 'Exento',
+        tax_rate: '0'
+      }));
+      return;
+    }
+
+    const taxName = selectedValue.slice(0, separatorIndex).trim() || 'Exento';
+    const taxRate = Number(selectedValue.slice(separatorIndex + 1));
+
+    setProductForm((current) => ({
+      ...current,
+      tax_name: taxName,
+      tax_rate: Number.isFinite(taxRate) ? String(taxRate) : '0'
+    }));
+  }
 
   function addProductToTicket(product) {
     clearMessages();
@@ -2466,6 +2523,50 @@ export function PosPage() {
                     type="number"
                     value={productForm.cost_price}
                   />
+                </label>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Margen de Ganancia</span>
+                  <input
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    readOnly
+                    type="text"
+                    value={formatCurrency(productProfitMargin)}
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Precio con impuesto</span>
+                  <input
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    readOnly
+                    type="text"
+                    value={formatCurrency(productPriceWithTax)}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-1">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Impuesto</span>
+                  <select
+                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                    onChange={handleProductTaxChange}
+                    value={selectedTaxValue}
+                  >
+                    {configuredTaxOptions.map((taxOption, index) => {
+                      const optionName = String(taxOption?.name || '').trim();
+                      const optionRate = Number(taxOption?.rate || 0);
+                      const optionValue = `${optionName}|${optionRate}`;
+
+                      return (
+                        <option key={`${optionValue}-${index}`} value={optionValue}>
+                          {optionName} {optionRate}%
+                        </option>
+                      );
+                    })}
+                  </select>
                 </label>
               </div>
 

@@ -32,6 +32,8 @@ const baseProductSelect = `
     p.description,
     p.sale_price,
     p.cost_price,
+    p.tax_name,
+    p.tax_rate,
     p.stock_quantity,
     p.minimum_stock,
     p.unit_label,
@@ -190,11 +192,11 @@ productsRouter.post('/', upload.single('image'), async (request, response, next)
 
     const result = await query(
       `INSERT INTO products (
-         category_id, sku, name, description, sale_price, cost_price, stock_quantity,
+         category_id, sku, name, description, sale_price, cost_price, tax_name, tax_rate, stock_quantity,
          minimum_stock, unit_label, barcode, image_blob, image_mime_type, image_size_bytes, is_active
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, sku, name, sale_price, stock_quantity, image_blob, image_mime_type, image_size_bytes, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       RETURNING id, sku, name, sale_price, cost_price, tax_name, tax_rate, stock_quantity, image_blob, image_mime_type, image_size_bytes, created_at`,
       [
         payload.category_id,
         payload.sku,
@@ -202,6 +204,8 @@ productsRouter.post('/', upload.single('image'), async (request, response, next)
         payload.description,
         payload.sale_price,
         payload.cost_price,
+        payload.tax_name,
+        payload.tax_rate,
         payload.stock_quantity,
         payload.minimum_stock,
         payload.unit_label,
@@ -261,7 +265,7 @@ productsRouter.put('/:id', upload.single('image'), async (request, response, nex
       `UPDATE products
        SET ${setClauses.join(', ')}
        WHERE id = $${keys.length + 1}
-       RETURNING id, sku, name, sale_price, stock_quantity, image_blob, image_mime_type, image_size_bytes, updated_at`,
+       RETURNING id, sku, name, sale_price, cost_price, tax_name, tax_rate, stock_quantity, image_blob, image_mime_type, image_size_bytes, updated_at`,
       [...values, productId]
     );
 

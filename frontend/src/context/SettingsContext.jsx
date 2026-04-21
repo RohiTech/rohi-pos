@@ -9,6 +9,10 @@ const DEFAULT_SETTINGS = {
   time_zone: 'America/Managua',
   membership_expiry_alert_days: 3,
   routine_price: 0,
+  tax_options: [
+    { name: 'Exento', rate: 0 },
+    { name: 'IVA', rate: 15 }
+  ],
   company_name: 'RohiPOS',
   company_motto: '',
   company_ruc: '',
@@ -23,11 +27,27 @@ const DEFAULT_SETTINGS = {
 };
 
 function normalizeSettings(raw = {}) {
+  const normalizedTaxOptions = Array.isArray(raw.tax_options)
+    ? raw.tax_options
+        .map((item) => ({
+          name: String(item?.name || '').trim(),
+          rate: Number(item?.rate)
+        }))
+        .filter((item) => item.name && Number.isFinite(item.rate) && item.rate >= 0 && item.rate <= 100)
+    : [];
+
   return {
     currency_code: raw.currency_code || 'NIO',
     time_zone: raw.time_zone || 'America/Managua',
     membership_expiry_alert_days: Number(raw.membership_expiry_alert_days || 3),
     routine_price: Number(raw.routine_price || 0),
+    tax_options:
+      normalizedTaxOptions.length > 0
+        ? normalizedTaxOptions
+        : [
+            { name: 'Exento', rate: 0 },
+            { name: 'IVA', rate: 15 }
+          ],
     company_name: raw.company_name || 'RohiPOS',
     company_motto: raw.company_motto || '',
     company_ruc: raw.company_ruc || '',

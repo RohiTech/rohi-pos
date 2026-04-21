@@ -122,6 +122,8 @@ CREATE TABLE products (
     description TEXT,
     sale_price NUMERIC(12, 2) NOT NULL,
     cost_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    tax_name VARCHAR(60) NOT NULL DEFAULT 'Exento',
+    tax_rate NUMERIC(5, 2) NOT NULL DEFAULT 0,
     stock_quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
     minimum_stock NUMERIC(12, 2) NOT NULL DEFAULT 0,
     unit_label VARCHAR(20) NOT NULL DEFAULT 'unit',
@@ -132,6 +134,7 @@ CREATE TABLE products (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT products_sale_price_chk CHECK (sale_price >= 0),
     CONSTRAINT products_cost_price_chk CHECK (cost_price >= 0),
+    CONSTRAINT products_tax_rate_chk CHECK (tax_rate >= 0 AND tax_rate <= 100),
     CONSTRAINT products_stock_quantity_chk CHECK (stock_quantity >= 0),
     CONSTRAINT products_minimum_stock_chk CHECK (minimum_stock >= 0)
 );

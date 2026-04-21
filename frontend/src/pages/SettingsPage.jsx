@@ -26,6 +26,12 @@ export function SettingsPage() {
   const [timeZone, setTimeZone] = useState(settings.time_zone || 'America/Managua');
   const [alertDays, setAlertDays] = useState(settings.membership_expiry_alert_days || 3);
   const [routinePrice, setRoutinePrice] = useState(settings.routine_price || 0);
+  const [taxOptions, setTaxOptions] = useState(
+    settings.tax_options || [
+      { name: 'Exento', rate: 0 },
+      { name: 'IVA', rate: 15 }
+    ]
+  );
   const [companyLogoFile, setCompanyLogoFile] = useState(null);
   const [loginBackgroundFile, setLoginBackgroundFile] = useState(null);
   const [kioskLogoFile, setKioskLogoFile] = useState(null);
@@ -41,6 +47,12 @@ export function SettingsPage() {
 
   useEffect(() => {
     setRoutinePrice(settings.routine_price || 0);
+    setTaxOptions(
+      settings.tax_options || [
+        { name: 'Exento', rate: 0 },
+        { name: 'IVA', rate: 15 }
+      ]
+    );
     setAlertDays(settings.membership_expiry_alert_days || 3);
     setCompanyName(settings.company_name || 'RohiPOS');
     setCompanyMotto(settings.company_motto || '');
@@ -60,8 +72,30 @@ export function SettingsPage() {
     settings.company_address,
     settings.time_zone,
     settings.membership_expiry_alert_days,
-    settings.routine_price
+    settings.routine_price,
+    settings.tax_options
   ]);
+
+  function handleTaxOptionChange(index, field, value) {
+    setTaxOptions((current) =>
+      current.map((option, optionIndex) =>
+        optionIndex === index
+          ? {
+              ...option,
+              [field]: field === 'rate' ? value : value
+            }
+          : option
+      )
+    );
+  }
+
+  function addTaxOption() {
+    setTaxOptions((current) => [...current, { name: '', rate: '0' }]);
+  }
+
+  function removeTaxOption(index) {
+    setTaxOptions((current) => (current.length <= 1 ? current : current.filter((_, i) => i !== index)));
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -80,7 +114,11 @@ export function SettingsPage() {
         company_address: String(companyAddress || '').trim(),
         time_zone: String(timeZone || 'America/Managua').trim(),
         membership_expiry_alert_days: Number(alertDays),
-        routine_price: Number(routinePrice)
+        routine_price: Number(routinePrice),
+        tax_options: taxOptions.map((option) => ({
+          name: String(option.name || '').trim(),
+          rate: Number(option.rate || 0)
+        }))
       });
       setMessage('Configuracion guardada correctamente.');
     } catch (requestError) {
@@ -202,6 +240,47 @@ export function SettingsPage() {
                   value={routinePrice}
                 />
               </label>
+
+              <div className="grid gap-3 rounded-2xl border border-brand-sand bg-brand-cream/30 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-brand-forest">Impuestos disponibles</span>
+                  <button
+                    className="rounded-xl border border-brand-sand px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-brand-forest"
+                    onClick={addTaxOption}
+                    type="button"
+                  >
+                    Agregar
+                  </button>
+                </div>
+
+                {taxOptions.map((option, index) => (
+                  <div className="grid gap-2 md:grid-cols-[1fr_140px_auto]" key={`tax-option-${index}`}>
+                    <input
+                      className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                      onChange={(event) => handleTaxOptionChange(index, 'name', event.target.value)}
+                      placeholder="Nombre impuesto"
+                      value={option.name}
+                    />
+                    <input
+                      className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                      min="0"
+                      onChange={(event) => handleTaxOptionChange(index, 'rate', event.target.value)}
+                      step="0.01"
+                      type="number"
+                      value={option.rate}
+                    />
+                    <button
+                      className="rounded-2xl border border-rose-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-600 disabled:opacity-60"
+                      disabled={taxOptions.length <= 1}
+                      onClick={() => removeTaxOption(index)}
+                      type="button"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                ))}
+                <p className="text-xs text-brand-forest/70">Ejemplos: Exento 0%, IVA 15%.</p>
+              </div>
 
               <button
                 className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"

@@ -18,3 +18,7 @@ ON CONFLICT (setting_key) DO NOTHING;
 INSERT INTO system_settings (setting_key, setting_value, description)
 VALUES ('routine_price', '0', 'Precio configurado para la rutina')
 ON CONFLICT (setting_key) DO NOTHING;
+
+INSERT INTO system_settings (setting_key, setting_value, description)
+VALUES ('tax_options', '[{"name":"Exento","rate":0},{"name":"IVA","rate":15}]', 'Listado de impuestos disponibles para productos en formato JSON')
+ON CONFLICT (setting_key) DO NOTHING;
