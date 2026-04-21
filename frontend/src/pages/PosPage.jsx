@@ -93,13 +93,6 @@ function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function getTicketLineTotal(product, item) {
-  const quantity = Number(item.quantity || 0);
-  const unitPrice = Number(product?.sale_price || 0);
-  const discount = Number(item.discount || 0);
-  return Math.max(unitPrice * quantity - discount, 0);
-}
-
 function getNumericInputValue(currentValue, key) {
   const current = String(currentValue || '');
 
@@ -1163,16 +1156,30 @@ export function PosPage() {
       saleForm.items.map((item, index) => {
         const product = products.find((entry) => String(entry.id) === String(item.product_id));
         const quantity = Number(item.quantity || 0);
-        const unitPrice = Number(product?.sale_price || 0);
+        const unitBasePrice = Number(product?.sale_price || 0);
+        const taxRate = Number(product?.tax_rate || 0);
+        const unitPrice = unitBasePrice * (1 + taxRate / 100);
         const discount = Number(item.discount || 0);
-        const lineTotal = getTicketLineTotal(product, item);
+        const grossBaseTotal = unitBasePrice * quantity;
+        const grossTaxTotal = grossBaseTotal * (taxRate / 100);
+        const grossLineTotal = grossBaseTotal + grossTaxTotal;
+        const appliedDiscount = Math.min(discount, grossLineTotal);
+        const netRatio = grossLineTotal > 0 ? (grossLineTotal - appliedDiscount) / grossLineTotal : 0;
+        const lineBaseTotal = grossBaseTotal * netRatio;
+        const lineTaxTotal = grossTaxTotal * netRatio;
+        const lineTotal = lineBaseTotal + lineTaxTotal;
 
         return {
           index,
           product,
           quantity,
+          unitBasePrice,
+          taxRate,
           unitPrice,
           discount,
+          grossBaseTotal,
+          lineBaseTotal,
+          lineTaxTotal,
           lineTotal
         };
       }),
@@ -1180,9 +1187,12 @@ export function PosPage() {
   );
 
   const ticketSubtotal = ticketItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const ticketBaseSubtotal = ticketItems.reduce((sum, item) => sum + item.lineBaseTotal, 0);
+  const itemTaxAmount = ticketItems.reduce((sum, item) => sum + item.lineTaxTotal, 0);
   const globalDiscount = Number(saleForm.discount || 0);
-  const taxAmount = Number(saleForm.tax || 0);
-  const ticketTotal = Math.max(ticketSubtotal - globalDiscount + taxAmount, 0);
+  const manualTaxAmount = Number(saleForm.tax || 0);
+  const taxAmount = itemTaxAmount + manualTaxAmount;
+  const ticketTotal = Math.max(ticketBaseSubtotal - globalDiscount + taxAmount, 0);
   const tenderedAmount = Number(amountTendered || 0);
   const changeDue = Math.max(tenderedAmount - ticketTotal, 0);
   const balanceDue = Math.max(ticketTotal - tenderedAmount, 0);
@@ -1516,6 +1526,8 @@ export function PosPage() {
                         <th className="pb-3">Precio</th>
                         <th className="pb-3">Cant.</th>
                         <th className="pb-3">Desc.</th>
+                        <th className="pb-3">Imp.</th>
+                        <th className="pb-3">Subtotal</th>
                         <th className="pb-3 text-right">Total</th>
                       </tr>
                     </thead>
@@ -1542,6 +1554,8 @@ export function PosPage() {
                           <td className="py-3">{formatCurrency(item.unitPrice)}</td>
                           <td className="py-3">{item.quantity || 0}</td>
                           <td className="py-3">{formatCurrency(item.discount)}</td>
+                          <td className="py-3">{formatCurrency(item.lineTaxTotal)}</td>
+                          <td className="py-3">{formatCurrency(item.grossBaseTotal)}</td>
                           <td className="py-3 text-right font-semibold text-brand-clay">
                             {formatCurrency(item.lineTotal)}
                           </td>
@@ -1779,7 +1793,9 @@ export function PosPage() {
                           </span>
                         </div>
                         <p className="text-2xl font-bold text-brand-clay">
-                          {formatCurrency(product.sale_price)}
+                          {formatCurrency(
+                            Number(product.sale_price || 0) * (1 + Number(product.tax_rate || 0) / 100)
+                          )}
                         </p>
                         <p className="text-sm text-brand-forest/70">
                           {product.barcode || 'Sin codigo de barras'}
@@ -1818,7 +1834,7 @@ export function PosPage() {
               <div className="mt-5 grid gap-3">
                 <div className="flex items-center justify-between text-sm text-white/80">
                   <span>Subtotal lineas</span>
-                  <span>{formatCurrency(ticketSubtotal)}</span>
+                  <span>{formatCurrency(ticketBaseSubtotal)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm text-white/80">
                   <button
@@ -2500,7 +2516,7 @@ export function PosPage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-brand-forest">Precio de venta</span>
+                  <span className="text-sm font-semibold text-brand-forest">Precio base</span>
                   <input
                     className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                     min="0"
@@ -2537,7 +2553,7 @@ export function PosPage() {
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-brand-forest">Precio con impuesto</span>
+                  <span className="text-sm font-semibold text-brand-forest">Precio de venta</span>
                   <input
                     className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                     readOnly
@@ -2701,7 +2717,9 @@ export function PosPage() {
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Venta</p>
                         <p className="mt-1 font-semibold text-brand-clay">
-                          {formatCurrency(product.sale_price)}
+                          {formatCurrency(
+                            Number(product.sale_price || 0) * (1 + Number(product.tax_rate || 0) / 100)
+                          )}
                         </p>
                       </div>
                       <div>

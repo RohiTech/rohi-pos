@@ -47,6 +47,10 @@ function parseNonNegativeNumber(value, fieldName) {
   return parsed;
 }
 
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
 function parseReceiptUpdatePayload(payload) {
   const items = Array.isArray(payload.items) ? payload.items : [];
   if (items.length === 0) {
@@ -412,7 +416,7 @@ salesRouter.post('/', async (request, response, next) => {
 
       for (const item of payload.items) {
         const productResult = await dbClient.query(
-          `SELECT id, name, sale_price, stock_quantity, cost_price
+          `SELECT id, name, sale_price, tax_rate, stock_quantity, cost_price
            FROM products
            WHERE id = $1 AND is_active = TRUE
            FOR UPDATE`,
@@ -430,8 +434,10 @@ salesRouter.post('/', async (request, response, next) => {
           throw createHttpError(400, `Insufficient stock for product ${product.name}`);
         }
 
-        const unitPrice = Number(product.sale_price);
-        const lineTotal = unitPrice * item.quantity - item.discount;
+        const unitPrice = roundMoney(
+          Number(product.sale_price) * (1 + Number(product.tax_rate || 0) / 100)
+        );
+        const lineTotal = roundMoney(unitPrice * item.quantity - item.discount);
 
         if (lineTotal < 0) {
           throw createHttpError(400, `Invalid discount for product ${product.name}`);
@@ -447,8 +453,8 @@ salesRouter.post('/', async (request, response, next) => {
         });
       }
 
-      const subtotal = productSnapshots.reduce((sum, item) => sum + item.line_total, 0);
-      const total = subtotal - payload.discount + payload.tax;
+      const subtotal = roundMoney(productSnapshots.reduce((sum, item) => sum + item.line_total, 0));
+      const total = roundMoney(subtotal - payload.discount + payload.tax);
 
       if (total <= 0) {
         throw createHttpError(400, 'Sale total must be greater than zero');
@@ -694,7 +700,7 @@ salesRouter.put('/:id/receipt', async (request, response, next) => {
 
       for (const productId of productIds) {
         const productResult = await dbClient.query(
-          `SELECT id, name, sale_price, stock_quantity
+          `SELECT id, name, sale_price, tax_rate, stock_quantity
            FROM products
            WHERE id = $1
            FOR UPDATE`,
@@ -710,7 +716,10 @@ salesRouter.put('/:id/receipt', async (request, response, next) => {
 
       const preparedItems = payload.items.map((item) => {
         const product = productSnapshots.get(item.product_id);
-        const lineTotal = Number(product.sale_price) * Number(item.quantity) - Number(item.discount);
+        const unitPrice = roundMoney(
+          Number(product.sale_price) * (1 + Number(product.tax_rate || 0) / 100)
+        );
+        const lineTotal = roundMoney(unitPrice * Number(item.quantity) - Number(item.discount));
 
         if (lineTotal < 0) {
           throw createHttpError(400, `Invalid discount for product ${product.name}`);
@@ -719,7 +728,7 @@ salesRouter.put('/:id/receipt', async (request, response, next) => {
         return {
           ...item,
           name: product.name,
-          unit_price: Number(product.sale_price),
+          unit_price: unitPrice,
           line_total: lineTotal
         };
       });
@@ -759,8 +768,8 @@ salesRouter.put('/:id/receipt', async (request, response, next) => {
         );
       }
 
-      const subtotal = preparedItems.reduce((sum, item) => sum + Number(item.line_total), 0);
-      const total = subtotal - Number(payload.discount) + Number(payload.tax);
+      const subtotal = roundMoney(preparedItems.reduce((sum, item) => sum + Number(item.line_total), 0));
+      const total = roundMoney(subtotal - Number(payload.discount) + Number(payload.tax));
 
       if (total <= 0) {
         throw createHttpError(400, 'Sale total must be greater than zero');
