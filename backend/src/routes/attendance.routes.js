@@ -290,13 +290,7 @@ async function processAttendanceCheckin({
         };
       }
 
-      const deniedReason =
-        membership && membership.effective_status === 'expired'
-          ? 'La membresia esta expirada. Debe renovarla.'
-          : membership && membership.effective_status === 'cancelled'
-            ? 'La membresia del cliente esta cancelada.'
-            : 'El cliente no tiene una membresia vigente.';
-      throw createHttpError(409, deniedReason);
+      throw createHttpError(409, 'Debe pagar hoy');
     }
 
     const parsedDailyPassAmount = parsePositiveNumber(dailyPassAmount, 'daily_pass_amount');
