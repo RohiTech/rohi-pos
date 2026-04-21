@@ -427,10 +427,10 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       // Titulos de columna alineados
       const startY = doc.y;
       doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('N° Venta', 20, startY, { width: 220, align: 'left' });
-      doc.text('Total (C$)', 250, startY, { width: 90, align: 'right' });
-      doc.text('Hora', 350, startY, { width: 90, align: 'center' });
-      doc.text('Cajero', 450, startY, { width: 90, align: 'center' });
+      doc.text('N° Venta', 20, startY, { width: 200, align: 'left' });
+      doc.text('Total (C$)', 230, startY, { width: 80, align: 'right' });
+      doc.text('Fecha y hora', 320, startY, { width: 140, align: 'center' });
+      doc.text('Cajero', 470, startY, { width: 70, align: 'center' });
       doc.moveDown(1);
       doc.font('Helvetica').fontSize(10);
       rows.forEach(row => {
@@ -441,15 +441,15 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
             : row.source_type === 'daily_pass'
               ? 'Rutina diaria'
               : 'POS';
-        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 220, align: 'left' });
-        doc.text(`C$${Number(row.total).toFixed(2)}`, 250, y, { width: 90, align: 'right' });
+        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 200, align: 'left' });
+        doc.text(`C$${Number(row.total).toFixed(2)}`, 230, y, { width: 80, align: 'right' });
         doc.text(
-          new Date(row.operation_at).toLocaleTimeString('es-NI', { timeZone: systemTimeZone }),
-          350,
+          new Date(row.operation_at).toLocaleString('es-NI', { timeZone: systemTimeZone }),
+          320,
           y,
-          { width: 90, align: 'center' }
+          { width: 140, align: 'center' }
         );
-        doc.text(row.cashier_username || String(row.cashier_user_id), 450, y, { width: 90, align: 'center' });
+        doc.text(row.cashier_username || String(row.cashier_user_id), 470, y, { width: 70, align: 'center' });
         doc.moveDown(0.5);
       });
       doc.moveDown(1);

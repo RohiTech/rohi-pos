@@ -50,6 +50,13 @@ function getTodayDateString() {
   return `${year}-${month}-${day}`;
 }
 
+function getFirstDayOfCurrentMonthDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}-01`;
+}
+
 function getCurrentMonthString() {
   const now = new Date();
   const year = now.getFullYear();
@@ -58,6 +65,9 @@ function getCurrentMonthString() {
 }
 
 export function ReportsPage() {
+  const todayDate = getTodayDateString();
+  const firstDayOfCurrentMonth = getFirstDayOfCurrentMonthDateString();
+
   const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
   const [openCashSummaryModal, setOpenCashSummaryModal] = useState(false);
@@ -79,23 +89,23 @@ export function ReportsPage() {
   const [openAttendanceClientDetailModal, setOpenAttendanceClientDetailModal] = useState(false);
   const [openOperationalStatsModal, setOpenOperationalStatsModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: todayDate,
+    fechaFin: todayDate,
     cashierUserId: '',
     saleStatus: '',
     cashSessionId: ''
   });
   const [sellerParams, setSellerParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     sellerUserId: '',
     saleStatus: '',
     cashSessionId: ''
   });
   const [cashiers, setCashiers] = useState([]);
   const [params, setParams] = useState({
-    fechaInicio: '',
-    fechaFin: '',
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     categoryId: '',
     productSearch: '',
     productId: ''
@@ -104,34 +114,34 @@ export function ReportsPage() {
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [cashParams, setCashParams] = useState({
-    fechaInicio: '',
-    fechaFin: '',
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     sessionId: '',
     sessionStatus: ''
   });
   const [cashSessions, setCashSessions] = useState([]);
   const [activeClientsParams, setActiveClientsParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     search: '',
     onlyWithActiveMembership: false
   });
   const [newClientsParams, setNewClientsParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     search: '',
     activeStatus: '',
     withMembership: false
   });
   const [inactiveClientsParams, setInactiveClientsParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     search: '',
     withMembership: false
   });
   const [membershipsByClientParams, setMembershipsByClientParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     clientSearch: '',
     status: '',
     planId: '',
@@ -145,8 +155,8 @@ export function ReportsPage() {
     includePending: false
   });
   const [membershipsByPlanParams, setMembershipsByPlanParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     status: '',
     planId: ''
   });
@@ -176,8 +186,8 @@ export function ReportsPage() {
     includeZeroMinimum: false
   });
   const [inventoryMovementsParams, setInventoryMovementsParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
     movementType: '',
     categoryId: '',
     productId: '',
@@ -185,29 +195,29 @@ export function ReportsPage() {
   });
   const [productKardexParams, setProductKardexParams] = useState({
     productId: '',
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString()
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate
   });
   const [attendanceDailyParams, setAttendanceDailyParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString()
+    fechaInicio: todayDate,
+    fechaFin: todayDate
   });
   const [attendanceByClientParams, setAttendanceByClientParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: todayDate,
+    fechaFin: todayDate,
     search: '',
     status: ''
   });
   const [attendanceClientDetailParams, setAttendanceClientDetailParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString(),
+    fechaInicio: todayDate,
+    fechaFin: todayDate,
     search: '',
     status: '',
     accessType: ''
   });
   const [operationalStatsParams, setOperationalStatsParams] = useState({
-    fechaInicio: getTodayDateString(),
-    fechaFin: getTodayDateString()
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate
   });
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [inventoryProducts, setInventoryProducts] = useState([]);
