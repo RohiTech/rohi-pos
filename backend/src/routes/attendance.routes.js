@@ -553,10 +553,9 @@ attendanceRouter.get('/summary', async (_request, response, next) => {
          COUNT(*) FILTER (WHERE checked_in_at::date = CURRENT_DATE AND status = 'denied')::int AS denied_today,
          COALESCE((
            SELECT SUM(p.amount)
-           FROM checkins ch2
-           INNER JOIN payments p ON p.id = ch2.payment_id
-           WHERE ch2.checked_in_at::date = CURRENT_DATE
-             AND ch2.access_type = 'daily_pass'
+           FROM payments p
+           WHERE p.paid_at::date = CURRENT_DATE
+             AND p.payment_number LIKE 'DAY-%'
          ), 0)::numeric(12,2) AS daily_pass_income_today,
          COALESCE((SELECT COUNT(*) FROM recent_unique_clients), 0)::int AS current_inside_estimate,
          COALESCE((SELECT ROUND(AVG(allowed_count), 1) FROM daily_counts), 0)::numeric(10,1) AS average_daily_last_7_days,

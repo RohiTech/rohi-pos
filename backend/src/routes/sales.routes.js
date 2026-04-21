@@ -247,11 +247,11 @@ salesRouter.get('/summary', async (_request, response, next) => {
        daily_pass_income AS (
          SELECT
            COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total_income,
-           COALESCE(SUM(p.amount) FILTER (WHERE ch.checked_in_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
-         FROM checkins ch
-         INNER JOIN payments p ON p.id = ch.payment_id
-         WHERE ch.access_type = 'daily_pass'
-           AND ch.status = 'allowed'
+           COALESCE(SUM(p.amount) FILTER (WHERE p.paid_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
+         FROM payments p
+         WHERE p.payment_number LIKE 'DAY-%'
+           AND p.sale_id IS NULL
+           AND p.membership_id IS NULL
        ),
        memberships_income AS (
          SELECT
