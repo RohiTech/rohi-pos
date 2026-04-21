@@ -10,7 +10,6 @@ import { formatCurrency, formatDate } from '../lib/format';
 
 const initialForm = {
   client_id: '',
-  access_type: 'membership',
   payment_method: 'cash',
   daily_pass_amount: '',
   notes: ''
@@ -70,7 +69,7 @@ export function AttendancePage() {
     totalPages: 1
   });
   const [summary, setSummary] = useState(null);
-  const [checkins, setCheckins] = useState([]);
+  const [dailyPayments, setDailyPayments] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
@@ -138,12 +137,13 @@ export function AttendancePage() {
       const querySuffix = buildQueryString({
         search: searchTerm.trim(),
         page,
-        limit: 8
+        limit: 8,
+        only_without_active_membership: true
       });
 
-      const [summaryResponse, checkinsResponse, attendanceClientsResponse, clientsResponse] = await Promise.all([
+      const [summaryResponse, dailyPaymentsResponse, attendanceClientsResponse, clientsResponse] = await Promise.all([
         apiGet('/attendance/summary'),
-        apiGet('/attendance/checkins'),
+        apiGet('/attendance/daily-pass-payments'),
         apiGet(`/attendance/clients${querySuffix}`),
         apiGet(`/clients${querySuffix}`)
       ]);
@@ -158,7 +158,7 @@ export function AttendancePage() {
       }));
 
       setSummary(summaryResponse.data);
-      setCheckins(checkinsResponse.data);
+      setDailyPayments(dailyPaymentsResponse.data || []);
       setClients(attendanceClients);
       setClientPagination(
         attendanceClientsResponse.pagination || {
@@ -179,19 +179,6 @@ export function AttendancePage() {
     loadDashboard(submittedSearch, clientPage);
   }, [submittedSearch, clientPage]);
 
-  useEffect(() => {
-    if (!selectedClient) {
-      return;
-    }
-
-    if (!selectedClient.can_check_in_with_membership && form.access_type === 'membership') {
-      setForm((current) => ({
-        ...current,
-        access_type: 'daily_pass'
-      }));
-    }
-  }, [form.access_type, selectedClient]);
-
   function handleSelectClient(client) {
     if (!client.is_active) {
       setSelectedClient(client);
@@ -205,18 +192,13 @@ export function AttendancePage() {
     setForm((current) => ({
       ...current,
       client_id: String(client.id),
-      access_type: client.can_check_in_with_membership ? 'membership' : 'daily_pass',
-      daily_pass_amount: client.can_check_in_with_membership ? current.daily_pass_amount : String(settings.routine_price || '')
+      daily_pass_amount: String(settings.routine_price || current.daily_pass_amount || '')
     }));
     setMessage('');
     setError('');
   }
 
   useEffect(() => {
-    if (form.access_type !== 'daily_pass') {
-      return;
-    }
-
     if (Number(form.daily_pass_amount || 0) > 0) {
       return;
     }
@@ -225,7 +207,7 @@ export function AttendancePage() {
       ...current,
       daily_pass_amount: String(settings.routine_price || '')
     }));
-  }, [form.access_type, form.daily_pass_amount, settings.routine_price]);
+  }, [form.daily_pass_amount, settings.routine_price]);
 
   async function handleSearch(event) {
     event.preventDefault();
@@ -418,9 +400,25 @@ export function AttendancePage() {
     setMessage('');
 
     try {
-      await registerAttendance(selectedClient);
+      const checkedInByUserId = userIdRef.current;
+      if (!checkedInByUserId) {
+        throw new Error('No se detecto la sesion del usuario. Recarga la pagina e intenta de nuevo.');
+      }
+
+      await apiPost('/attendance/daily-pass-payments', {
+        client_id: Number(selectedClient.id),
+        received_by_user_id: checkedInByUserId,
+        payment_method: form.payment_method,
+        daily_pass_amount: Number(form.daily_pass_amount || 0),
+        notes: form.notes || null
+      });
+
+      setMessage('Pago diario registrado correctamente. El cliente ya puede marcar asistencia hoy.');
+      setForm(initialForm);
+      setSelectedClient(null);
+      await loadDashboard(submittedSearchRef.current, clientPageRef.current);
     } catch (requestError) {
-      setError(requestError.message || 'No fue posible registrar la asistencia');
+      setError(requestError.message || 'No fue posible registrar el pago diario');
     } finally {
       setSaving(false);
     }
@@ -562,35 +560,37 @@ export function AttendancePage() {
             <Pagination currentPage={clientPagination.page} itemLabel="clientes" onPageChange={setClientPage} pageSize={clientPagination.limit} totalItems={clientPagination.totalItems} totalPages={clientPagination.totalPages} />
           </DataPanel>
 
-          <DataPanel title="Ingresos del dia" subtitle="Registro de asistencia procesado hoy.">
-            {!checkins.length ? (
-              <EmptyState title="Sin asistencias" description="Todavia no hay ingresos registrados hoy." />
+          <DataPanel title="Pagos de rutina del dia" subtitle="Clientes que ya pagaron su rutina hoy.">
+            {!dailyPayments.length ? (
+              <EmptyState title="Sin pagos" description="Todavia no hay pagos diarios registrados hoy." />
             ) : (
               <div className="space-y-3">
-                {checkins.map((checkin) => (
-                  <article key={checkin.id} className="rounded-2xl border border-brand-sand/70 p-4">
+                {dailyPayments.map((payment) => (
+                  <article key={payment.id} className="rounded-2xl border border-brand-sand/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
-                          {checkin.client_code}
+                          {payment.client_code}
                         </p>
                         <h3 className="mt-1 font-semibold text-brand-forest">
-                          {checkin.client_first_name} {checkin.client_last_name}
+                          {payment.client_first_name} {payment.client_last_name}
                         </h3>
                         <p className="mt-1 text-sm text-brand-forest/70">
-                          {checkin.access_type === 'daily_pass'
-                            ? `Pago diario · ${formatCurrency(checkin.payment_amount || 0)}`
-                            : `Membresia ${checkin.membership_number || 'sin numero'}`}
+                          Pago diario · {formatCurrency(payment.amount || 0)} · Metodo: {payment.payment_method}
                         </p>
                       </div>
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${getAttendanceTone(checkin.status)}`}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
+                          payment.used_for_checkin_today
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-amber-100 text-amber-700'
+                        }`}
                       >
-                        {checkin.status}
+                        {payment.used_for_checkin_today ? 'Asistencia usada' : 'Pendiente de marcar'}
                       </span>
                     </div>
                     <p className="mt-3 text-sm text-brand-forest/70">
-                      Fecha: {formatDate(checkin.checked_in_at)} · {checkin.notes || 'Sin notas'}
+                      Fecha pago: {formatDate(payment.paid_at)} · {payment.notes || 'Sin notas'}
                     </p>
                   </article>
                 ))}
@@ -600,8 +600,8 @@ export function AttendancePage() {
         </div>
 
         <DataPanel
-          title="Registrar asistencia"
-          subtitle={`Aviso configurado ${settings.membership_expiry_alert_days} dia(s) antes del vencimiento.`}
+          title="Registrar pago de rutina"
+          subtitle="Solo clientes sin membresia activa. El pago habilita asistencia durante hoy."
         >
           {selectedClient ? (
             <div className="mb-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
@@ -633,7 +633,7 @@ export function AttendancePage() {
                 </div>
               </div>
               <p className="mt-2 text-sm text-brand-forest/70">
-                Plan: {selectedClient.plan_name || 'Sin membresia vigente'}
+                Plan actual: {selectedClient.plan_name || 'Sin membresia activa'}
               </p>
               <p className="mt-1 text-sm text-brand-forest/70">
                 Vence: {formatDate(selectedClient.end_date)}
@@ -643,76 +643,48 @@ export function AttendancePage() {
                   El cliente esta inactivo. No se puede registrar asistencia.
                 </p>
               ) : null}
-              {!selectedClient.can_check_in_with_membership ? (
-                <p className="mt-3 rounded-2xl bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-700">
-                  La membresia no esta vigente. Solo se permite ingreso con pago diario.
-                </p>
-              ) : null}
             </div>
           ) : (
-            <EmptyState title="Sin cliente seleccionado" description="Selecciona un cliente desde la lista de busqueda." />
+            <EmptyState title="Sin cliente seleccionado" description="Selecciona un cliente sin membresia activa desde la lista." />
           )}
 
           <form className="mt-4 grid gap-4" onSubmit={handleSubmit}>
             <label className="grid gap-2">
-              <span className="text-sm font-semibold text-brand-forest">Tipo de acceso</span>
+              <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
+              <input
+                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                min="0.01"
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    daily_pass_amount: event.target.value
+                  }))
+                }
+                step="0.01"
+                type="number"
+                value={form.daily_pass_amount}
+              />
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-sm font-semibold text-brand-forest">Metodo de pago</span>
               <select
                 className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    access_type: event.target.value
+                    payment_method: event.target.value
                   }))
                 }
-                value={form.access_type}
+                value={form.payment_method}
               >
-                <option disabled={selectedClient ? !selectedClient.can_check_in_with_membership : false} value="membership">
-                  Con membresia
-                </option>
-                <option value="daily_pass">Pago del dia</option>
+                <option value="cash">Efectivo</option>
+                <option value="card">Tarjeta</option>
+                <option value="transfer">Transferencia</option>
+                <option value="mobile">Pago movil</option>
+                <option value="other">Otro</option>
               </select>
             </label>
-
-            {form.access_type === 'daily_pass' ? (
-              <>
-                <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
-                  <input
-                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                    min="0.01"
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        daily_pass_amount: event.target.value
-                      }))
-                    }
-                    step="0.01"
-                    type="number"
-                    value={form.daily_pass_amount}
-                  />
-                </label>
-
-                <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-brand-forest">Metodo de pago</span>
-                  <select
-                    className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        payment_method: event.target.value
-                      }))
-                    }
-                    value={form.payment_method}
-                  >
-                    <option value="cash">Efectivo</option>
-                    <option value="card">Tarjeta</option>
-                    <option value="transfer">Transferencia</option>
-                    <option value="mobile">Pago movil</option>
-                    <option value="other">Otro</option>
-                  </select>
-                </label>
-              </>
-            ) : null}
 
             <label className="grid gap-2">
               <span className="text-sm font-semibold text-brand-forest">Notas</span>
@@ -734,12 +706,11 @@ export function AttendancePage() {
               disabled={
                 saving ||
                 !selectedClient ||
-                !selectedClient.is_active ||
-                (form.access_type === 'membership' && !selectedClient.can_check_in_with_membership)
+                !selectedClient.is_active
               }
               type="submit"
             >
-              {saving ? 'Procesando...' : 'Marcar asistencia'}
+              {saving ? 'Procesando...' : 'Registrar pago diario'}
             </button>
           </form>
         </DataPanel>

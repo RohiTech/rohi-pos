@@ -6,6 +6,7 @@ import { createHttpError } from '../utils/http.js';
 
 const settingsRouter = Router();
 const SYSTEM_CURRENCY = 'NIO';
+const DEFAULT_TIME_ZONE = 'America/Managua';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -15,6 +16,7 @@ const upload = multer({
 
 const SETTINGS_KEYS = [
   'currency_code',
+  'time_zone',
   'membership_expiry_alert_days',
   'routine_price',
   'company_name',
@@ -32,6 +34,7 @@ const SETTINGS_KEYS = [
 
 const SETTINGS_DESCRIPTIONS = {
   currency_code: 'Codigo de moneda principal del sistema',
+  time_zone: 'Zona horaria oficial del gimnasio para reportes y operaciones',
   membership_expiry_alert_days: 'Dias de anticipacion para avisar vencimiento de membresia',
   routine_price: 'Precio configurado para la rutina',
   company_name: 'Nombre comercial de la empresa',
@@ -47,9 +50,22 @@ const SETTINGS_DESCRIPTIONS = {
   kiosk_background_data_url: 'Imagen de fondo para modo kiosko QR'
 };
 
+function isValidTimeZone(value) {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function mapSettingsResponse(settings) {
+  const requestedTimeZone = String(settings.time_zone || '').trim();
+  const timeZone = isValidTimeZone(requestedTimeZone) ? requestedTimeZone : DEFAULT_TIME_ZONE;
+
   return {
     currency_code: settings.currency_code || SYSTEM_CURRENCY,
+    time_zone: timeZone,
     membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3),
     routine_price: Number(settings.routine_price || 0),
     company_name: settings.company_name || 'RohiPOS',
@@ -112,6 +128,7 @@ settingsRouter.put('/', async (request, response, next) => {
     const companyEmail = String(request.body.company_email || '').trim();
     const companyAddress = String(request.body.company_address || '').trim();
     const companyLegalName = String(request.body.company_legal_name || '').trim();
+    const timeZone = String(request.body.time_zone || DEFAULT_TIME_ZONE).trim();
 
     if (!Number.isInteger(alertDays) || alertDays < 0 || alertDays > 30) {
       throw createHttpError(400, 'membership_expiry_alert_days must be between 0 and 30');
@@ -149,7 +166,12 @@ settingsRouter.put('/', async (request, response, next) => {
       throw createHttpError(400, 'company_legal_name must not exceed 140 characters');
     }
 
+    if (!isValidTimeZone(timeZone)) {
+      throw createHttpError(400, 'time_zone is invalid');
+    }
+
     await upsertSetting('currency_code', SYSTEM_CURRENCY);
+    await upsertSetting('time_zone', timeZone);
     await upsertSetting('membership_expiry_alert_days', String(alertDays));
     await upsertSetting('routine_price', String(routinePrice));
     await upsertSetting('company_name', companyName);

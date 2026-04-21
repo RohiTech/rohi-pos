@@ -6,6 +6,7 @@ import { setCurrencyFormatterOptions } from '../lib/format';
 const SettingsContext = createContext(null);
 const DEFAULT_SETTINGS = {
   currency_code: 'NIO',
+  time_zone: 'America/Managua',
   membership_expiry_alert_days: 3,
   routine_price: 0,
   company_name: 'RohiPOS',
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS = {
 function normalizeSettings(raw = {}) {
   return {
     currency_code: raw.currency_code || 'NIO',
+    time_zone: raw.time_zone || 'America/Managua',
     membership_expiry_alert_days: Number(raw.membership_expiry_alert_days || 3),
     routine_price: Number(raw.routine_price || 0),
     company_name: raw.company_name || 'RohiPOS',

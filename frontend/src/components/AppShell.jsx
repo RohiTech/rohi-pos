@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useSettings } from '../context/SettingsContext';
 
 const navigation = [
   { to: '/', label: 'Dashboard', shortLabel: 'DB' },
-  { to: '/attendance', label: 'Asistencia', shortLabel: 'AS' },
-  { to: '/attendance-kiosk', label: 'Asistencia QR', shortLabel: 'QR' },
+  { to: '/attendance', label: 'Pago Rutina', shortLabel: 'PR' },
+  { to: '/attendance-kiosk', label: 'Kiosko', shortLabel: 'KI' },
   { to: '/clients', label: 'Clientes', shortLabel: 'CL' },
   { to: '/memberships', label: 'Membresias', shortLabel: 'MB' },
   { to: '/pos', label: 'POS', shortLabel: 'POS' },
@@ -28,6 +29,8 @@ function navClassName({ isActive }, isCollapsed) {
 
 export function AppShell() {
   const { user, logout } = useAuth();
+  const { settings } = useSettings();
+  const companyName = settings.company_name || 'RohiPOS';
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
       return false;
@@ -54,7 +57,7 @@ export function AppShell() {
         >
           <div className={`mb-6 flex items-start ${isCollapsed ? 'justify-center' : 'justify-between gap-3'}`}>
             <div className={isCollapsed ? 'hidden' : 'min-w-0'}>
-              <p className="text-sm uppercase tracking-[0.3em] text-brand-sand/80">RohiPOS</p>
+              <p className="text-sm uppercase tracking-[0.3em] text-brand-sand/80">{companyName}</p>
             </div>
 
             <button
@@ -72,7 +75,7 @@ export function AppShell() {
           {isCollapsed ? (
             <div className="mb-6 flex justify-center">
               <p className="text-xs uppercase tracking-[0.28em] text-brand-sand/80 [writing-mode:vertical-rl] [transform:rotate(180deg)]">
-                RohiPOS
+                {companyName}
               </p>
             </div>
           ) : null}

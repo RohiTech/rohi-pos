@@ -2,6 +2,18 @@ import { useEffect, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { useSettings } from '../context/SettingsContext';
 
+const TIME_ZONE_OPTIONS = [
+  { value: 'America/Managua', label: 'America/Managua (Nicaragua)' },
+  { value: 'America/Guatemala', label: 'America/Guatemala' },
+  { value: 'America/Costa_Rica', label: 'America/Costa Rica' },
+  { value: 'America/Mexico_City', label: 'America/Mexico City' },
+  { value: 'America/Bogota', label: 'America/Bogota' },
+  { value: 'America/Lima', label: 'America/Lima' },
+  { value: 'America/Panama', label: 'America/Panama' },
+  { value: 'America/New_York', label: 'America/New York' },
+  { value: 'UTC', label: 'UTC' }
+];
+
 export function SettingsPage() {
   const { settings, loading, updateSettings, updateBranding } = useSettings();
   const [companyName, setCompanyName] = useState(settings.company_name || 'RohiPOS');
@@ -11,6 +23,7 @@ export function SettingsPage() {
   const [companyPhone, setCompanyPhone] = useState(settings.company_phone || '');
   const [companyEmail, setCompanyEmail] = useState(settings.company_email || '');
   const [companyAddress, setCompanyAddress] = useState(settings.company_address || '');
+  const [timeZone, setTimeZone] = useState(settings.time_zone || 'America/Managua');
   const [alertDays, setAlertDays] = useState(settings.membership_expiry_alert_days || 3);
   const [routinePrice, setRoutinePrice] = useState(settings.routine_price || 0);
   const [companyLogoFile, setCompanyLogoFile] = useState(null);
@@ -36,6 +49,7 @@ export function SettingsPage() {
     setCompanyPhone(settings.company_phone || '');
     setCompanyEmail(settings.company_email || '');
     setCompanyAddress(settings.company_address || '');
+    setTimeZone(settings.time_zone || 'America/Managua');
   }, [
     settings.company_name,
     settings.company_motto,
@@ -44,6 +58,7 @@ export function SettingsPage() {
     settings.company_phone,
     settings.company_email,
     settings.company_address,
+    settings.time_zone,
     settings.membership_expiry_alert_days,
     settings.routine_price
   ]);
@@ -63,6 +78,7 @@ export function SettingsPage() {
         company_phone: String(companyPhone || '').trim(),
         company_email: String(companyEmail || '').trim(),
         company_address: String(companyAddress || '').trim(),
+        time_zone: String(timeZone || 'America/Managua').trim(),
         membership_expiry_alert_days: Number(alertDays),
         routine_price: Number(routinePrice)
       });
@@ -145,6 +161,21 @@ export function SettingsPage() {
                 <p className="text-sm font-semibold text-brand-forest">Moneda</p>
                 <p className="mt-1 text-sm text-brand-forest/70">Cordoba nicaraguense (NIO)</p>
               </div>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Zona horaria del gimnasio</span>
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={(event) => setTimeZone(event.target.value)}
+                  value={timeZone}
+                >
+                  {TIME_ZONE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">

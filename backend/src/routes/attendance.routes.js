@@ -149,6 +149,79 @@ async function ensureClientCanCheckInToday(clientId, dbClient = null) {
   }
 }
 
+async function findTodayDailyPassPayment(clientId, dbClient = null) {
+  const executor = dbClient || { query };
+  const result = await executor.query(
+    `SELECT
+       p.id,
+       p.payment_number,
+       p.amount,
+       p.payment_method,
+       p.currency_code,
+       p.paid_at
+     FROM payments p
+     LEFT JOIN checkins ch ON ch.payment_id = p.id
+     WHERE p.client_id = $1
+       AND p.sale_id IS NULL
+       AND p.membership_id IS NULL
+       AND p.paid_at::date = CURRENT_DATE
+       AND ch.id IS NULL
+     ORDER BY p.paid_at DESC, p.id DESC
+     LIMIT 1`,
+    [clientId]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function registerDailyPassPayment({
+  clientId,
+  receivedByUserId,
+  paymentMethod,
+  amount,
+  notes
+}) {
+  const client = await ensureClientExists(clientId);
+  ensureClientIsActive(client);
+  await ensureUserExists(receivedByUserId);
+  const settings = await getSystemSettings();
+  const parsedAmount = parsePositiveNumber(amount, 'daily_pass_amount');
+
+  const latestMembership = await getLatestMembershipForClient(clientId);
+  if (latestMembership?.effective_status === 'active') {
+    throw createHttpError(409, 'El cliente tiene membresia activa. No requiere pago de rutina diaria.');
+  }
+
+  const paymentNumber = `DAY-${Date.now().toString().slice(-6)}`;
+  const paymentResult = await query(
+    `INSERT INTO payments (
+       payment_number,
+       client_id,
+       received_by_user_id,
+       payment_method,
+       amount,
+       currency_code,
+       notes
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, payment_number, amount, payment_method, paid_at, notes`,
+    [
+      paymentNumber,
+      clientId,
+      receivedByUserId,
+      paymentMethod,
+      parsedAmount,
+      settings.currency_code,
+      notes || 'Pago diario de rutina'
+    ]
+  );
+
+  return {
+    client,
+    payment: paymentResult.rows[0]
+  };
+}
+
 async function processAttendanceCheckin({
   clientId,
   checkedInByUserId,
@@ -188,6 +261,32 @@ async function processAttendanceCheckin({
           client,
           membership,
           warning_message: warning
+        };
+      }
+
+      const todayDailyPassPayment = await findTodayDailyPassPayment(clientId, dbClient);
+      if (todayDailyPassPayment) {
+        const checkinResult = await dbClient.query(
+          `INSERT INTO checkins (
+             client_id, membership_id, payment_id, checked_in_by_user_id, status, access_type, notes
+           )
+           VALUES ($1, $2, $3, $4, 'allowed', 'daily_pass', $5)
+           RETURNING id, checked_in_at, status, access_type`,
+          [
+            clientId,
+            membership?.id || null,
+            todayDailyPassPayment.id,
+            checkedInByUserId,
+            notes || 'Ingreso permitido por pago diario registrado hoy'
+          ]
+        );
+
+        return {
+          ...checkinResult.rows[0],
+          client,
+          membership,
+          payment: todayDailyPassPayment,
+          warning_message: null
         };
       }
 
@@ -251,6 +350,7 @@ async function processAttendanceCheckin({
 attendanceRouter.get('/clients', async (request, response, next) => {
   try {
     const search = String(request.query.search || '').trim();
+    const onlyWithoutActiveMembership = String(request.query.only_without_active_membership || '').trim() === 'true';
     const { page, limit, offset } = parsePaginationParams(request.query, {
       defaultLimit: 8,
       maxLimit: 100
@@ -262,6 +362,18 @@ attendanceRouter.get('/clients', async (request, response, next) => {
       params.push(`%${search}%`);
       conditions.push(
         `(c.client_code ILIKE $${params.length} OR c.first_name ILIKE $${params.length} OR c.last_name ILIKE $${params.length} OR COALESCE(c.phone, '') ILIKE $${params.length})`
+      );
+    }
+
+    if (onlyWithoutActiveMembership) {
+      conditions.push(
+        `NOT EXISTS (
+          SELECT 1
+          FROM memberships m_active
+          WHERE m_active.client_id = c.id
+            AND m_active.status <> 'cancelled'
+            AND CURRENT_DATE BETWEEN m_active.start_date AND m_active.end_date
+        )`
       );
     }
 
@@ -320,6 +432,45 @@ attendanceRouter.get('/clients', async (request, response, next) => {
             : inferMembershipStatus(row.start_date, row.end_date)
       })),
       pagination: createPaginationMeta(totalItems, page, limit)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+attendanceRouter.get('/daily-pass-payments', async (_request, response, next) => {
+  try {
+    const result = await query(
+      `SELECT
+         p.id,
+         p.payment_number,
+         p.amount,
+         p.payment_method,
+         p.paid_at,
+         p.notes,
+         c.id AS client_id,
+         c.client_code,
+         c.first_name AS client_first_name,
+         c.last_name AS client_last_name,
+         EXISTS (
+           SELECT 1
+           FROM checkins ch
+           WHERE ch.payment_id = p.id
+             AND ch.checked_in_at::date = CURRENT_DATE
+         ) AS used_for_checkin_today
+       FROM payments p
+       INNER JOIN clients c ON c.id = p.client_id
+       WHERE p.sale_id IS NULL
+         AND p.membership_id IS NULL
+         AND p.paid_at::date = CURRENT_DATE
+       ORDER BY p.paid_at DESC, p.id DESC
+       LIMIT 200`
+    );
+
+    response.json({
+      ok: true,
+      count: result.rowCount,
+      data: result.rows
     });
   } catch (error) {
     next(error);
@@ -654,6 +805,43 @@ attendanceRouter.post('/checkins/by-code', async (request, response, next) => {
     response.status(201).json({
       ok: true,
       message: 'Check-in processed successfully',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+attendanceRouter.post('/daily-pass-payments', async (request, response, next) => {
+  try {
+    const clientId = parsePositiveInteger(request.body.client_id);
+    const receivedByUserId = parsePositiveInteger(request.body.received_by_user_id);
+    const paymentMethod = String(request.body.payment_method || 'cash').trim();
+    const notes = String(request.body.notes || '').trim() || null;
+
+    if (!clientId) {
+      throw createHttpError(400, 'client_id must be a positive integer');
+    }
+
+    if (!receivedByUserId) {
+      throw createHttpError(400, 'received_by_user_id must be a positive integer');
+    }
+
+    if (!ALLOWED_PAYMENT_METHODS.has(paymentMethod)) {
+      throw createHttpError(400, 'payment_method is invalid');
+    }
+
+    const result = await registerDailyPassPayment({
+      clientId,
+      receivedByUserId,
+      paymentMethod,
+      amount: request.body.daily_pass_amount,
+      notes
+    });
+
+    response.status(201).json({
+      ok: true,
+      message: 'Pago diario registrado correctamente',
       data: result
     });
   } catch (error) {

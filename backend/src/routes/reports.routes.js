@@ -5,6 +5,43 @@ import { Router } from 'express';
 import { query } from '../config/db.js';
 
 const reportsRouter = Router();
+const DEFAULT_TIME_ZONE = 'America/Managua';
+
+function isValidTimeZone(value) {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function getSystemTimeZone() {
+  const result = await query(
+    `SELECT setting_value
+     FROM system_settings
+     WHERE setting_key = 'time_zone'
+     LIMIT 1`
+  );
+
+  const requestedTimeZone = String(result.rows[0]?.setting_value || '').trim();
+  return isValidTimeZone(requestedTimeZone) ? requestedTimeZone : DEFAULT_TIME_ZONE;
+}
+
+function getCurrentDateInTimeZone(timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  return `${year}-${month}-${day}`;
+}
 
 function getImageBufferFromDataUrl(dataUrl) {
   const value = String(dataUrl || '').trim();
@@ -226,7 +263,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       cash_register_session_id: cashSessionIdRaw
     } = req.query;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const systemTimeZone = await getSystemTimeZone();
+    const today = getCurrentDateInTimeZone(systemTimeZone);
     const startDate = String(fechaInicio || today);
     const endDate = String(fechaFin || startDate);
 
@@ -269,7 +307,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            'pos'::text AS source_type
          FROM sales s
          LEFT JOIN users u ON u.id = s.cashier_user_id
-         WHERE s.sold_at::date BETWEEN $1 AND $2
+         WHERE (s.sold_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($5::text IS NULL OR s.status = $5::text)
            AND ($5::text IS NOT NULL OR s.status = 'completed')
            AND ($4::bigint IS NULL OR s.cashier_user_id = $4::bigint)
@@ -289,7 +327,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
          LEFT JOIN users u ON u.id = p.received_by_user_id
          WHERE $3::boolean = TRUE
            AND p.membership_id IS NOT NULL
-           AND p.paid_at::date BETWEEN $1 AND $2
+           AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
 
          UNION ALL
@@ -307,7 +345,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
          LEFT JOIN users u ON u.id = m.sold_by_user_id
          WHERE $3::boolean = TRUE
            AND m.amount_paid > 0
-           AND m.created_at::date BETWEEN $1 AND $2
+           AND (m.created_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR m.sold_by_user_id = $4::bigint)
            AND NOT EXISTS (
              SELECT 1
@@ -331,7 +369,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
          WHERE $3::boolean = TRUE
            AND ch.access_type = 'daily_pass'
            AND ch.status = 'allowed'
-           AND p.paid_at::date BETWEEN $1 AND $2
+           AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
        )
        SELECT * FROM pos_sales
@@ -346,7 +384,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
         includeAdditionalIncome,
         cashierUserId,
         saleStatus || null,
-        cashSessionId
+        cashSessionId,
+        systemTimeZone
       ]
     );
 
@@ -404,7 +443,12 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
               : 'POS';
         doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 220, align: 'left' });
         doc.text(`C$${Number(row.total).toFixed(2)}`, 250, y, { width: 90, align: 'right' });
-        doc.text(new Date(row.operation_at).toLocaleTimeString(), 350, y, { width: 90, align: 'center' });
+        doc.text(
+          new Date(row.operation_at).toLocaleTimeString('es-NI', { timeZone: systemTimeZone }),
+          350,
+          y,
+          { width: 90, align: 'center' }
+        );
         doc.text(row.cashier_username || String(row.cashier_user_id), 450, y, { width: 90, align: 'center' });
         doc.moveDown(0.5);
       });
@@ -421,10 +465,21 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     for (let i = 0; i < pageCount; i++) {
       doc.switchToPage(i);
       const bottom = doc.page.height - 90;
+      const now = new Date();
       // Lado izquierdo
       doc.fontSize(8).text(`Página: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
-      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
-      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.text(
+        `Hora Ejec.: ${now.toLocaleTimeString('es-NI', { hour12: false, timeZone: systemTimeZone })}`,
+        40,
+        bottom + 12,
+        { align: 'left' }
+      );
+      doc.text(
+        `Fecha Ejec.: ${now.toLocaleDateString('es-NI', { timeZone: systemTimeZone })}`,
+        40,
+        bottom + 24,
+        { align: 'left' }
+      );
       // Centro
       doc.fontSize(9).text('Reporte de Ventas Diarias', 1, bottom, { align: 'center' });
       doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
@@ -479,6 +534,8 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
       return res.status(400).json({ message: 'cash_register_session_id debe ser un entero positivo' });
     }
 
+    const systemTimeZone = await getSystemTimeZone();
+
     const includeAdditionalIncome = (!saleStatus || saleStatus === 'completed') && !cashSessionId;
 
     const { rows } = await query(
@@ -490,7 +547,7 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
            s.tax,
            s.sold_at AS operation_at
          FROM sales s
-         WHERE s.sold_at::date BETWEEN $1 AND $2
+         WHERE (s.sold_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($5::text IS NULL OR s.status = $5::text)
            AND ($5::text IS NOT NULL OR s.status = 'completed')
            AND ($4::bigint IS NULL OR s.cashier_user_id = $4::bigint)
@@ -507,7 +564,7 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
          FROM payments p
          WHERE $3::boolean = TRUE
            AND p.membership_id IS NOT NULL
-           AND p.paid_at::date BETWEEN $1 AND $2
+           AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
 
          UNION ALL
@@ -521,7 +578,7 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
          FROM memberships m
          WHERE $3::boolean = TRUE
            AND m.amount_paid > 0
-           AND m.created_at::date BETWEEN $1 AND $2
+           AND (m.created_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR m.sold_by_user_id = $4::bigint)
            AND NOT EXISTS (
              SELECT 1
@@ -542,7 +599,7 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
          WHERE $3::boolean = TRUE
            AND ch.access_type = 'daily_pass'
            AND ch.status = 'allowed'
-           AND p.paid_at::date BETWEEN $1 AND $2
+           AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
        )
        SELECT
@@ -569,7 +626,8 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
         includeAdditionalIncome,
         sellerUserId,
         saleStatus || null,
-        cashSessionId
+        cashSessionId,
+        systemTimeZone
       ]
     );
 
@@ -636,9 +694,20 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
     for (let i = 0; i < pageCount; i++) {
       doc.switchToPage(i);
       const bottom = doc.page.height - 90;
+      const now = new Date();
       doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
-      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
-      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.text(
+        `Hora Ejec.: ${now.toLocaleTimeString('es-NI', { hour12: false, timeZone: systemTimeZone })}`,
+        40,
+        bottom + 12,
+        { align: 'left' }
+      );
+      doc.text(
+        `Fecha Ejec.: ${now.toLocaleDateString('es-NI', { timeZone: systemTimeZone })}`,
+        40,
+        bottom + 24,
+        { align: 'left' }
+      );
       doc.fontSize(9).text('Reporte de Ventas por Vendedor', 1, bottom, { align: 'center' });
       doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
       doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
