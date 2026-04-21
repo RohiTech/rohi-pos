@@ -364,11 +364,11 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            NULL::bigint AS cash_register_session_id,
            'daily_pass'::text AS source_type
          FROM payments p
-         INNER JOIN checkins ch ON ch.payment_id = p.id
          LEFT JOIN users u ON u.id = p.received_by_user_id
          WHERE $3::boolean = TRUE
-           AND ch.access_type = 'daily_pass'
-           AND ch.status = 'allowed'
+           AND p.payment_number LIKE 'DAY-%'
+           AND p.sale_id IS NULL
+           AND p.membership_id IS NULL
            AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
        )
@@ -595,10 +595,10 @@ reportsRouter.get('/seller-sales/pdf', async (req, res, next) => {
            0::numeric(12,2) AS tax,
            p.paid_at AS operation_at
          FROM payments p
-         INNER JOIN checkins ch ON ch.payment_id = p.id
          WHERE $3::boolean = TRUE
-           AND ch.access_type = 'daily_pass'
-           AND ch.status = 'allowed'
+           AND p.payment_number LIKE 'DAY-%'
+           AND p.sale_id IS NULL
+           AND p.membership_id IS NULL
            AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
        )
@@ -3184,10 +3184,9 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
     const extraIncomeResult = await query(
       `SELECT
          COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS membership_income,
-         COALESCE(SUM(CASE WHEN ch.access_type = 'daily_pass' AND ch.status = 'allowed' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS daily_pass_income,
-         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL OR (ch.access_type = 'daily_pass' AND ch.status = 'allowed') THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_extra_income
+         COALESCE(SUM(CASE WHEN p.payment_number LIKE 'DAY-%' AND p.sale_id IS NULL AND p.membership_id IS NULL THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS daily_pass_income,
+         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL OR (p.payment_number LIKE 'DAY-%' AND p.sale_id IS NULL AND p.membership_id IS NULL) THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_extra_income
        FROM payments p
-       LEFT JOIN checkins ch ON ch.payment_id = p.id
        WHERE p.paid_at::date BETWEEN $1 AND $2`,
       [fechaInicio, fechaFin]
     );
