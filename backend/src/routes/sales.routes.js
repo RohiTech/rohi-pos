@@ -51,6 +51,30 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+function parseDataUrlToBuffer(dataUrl) {
+  const raw = String(dataUrl || '').trim();
+  if (!raw.startsWith('data:')) {
+    return null;
+  }
+
+  const base64Marker = ';base64,';
+  const markerIndex = raw.indexOf(base64Marker);
+  if (markerIndex < 0) {
+    return null;
+  }
+
+  const base64Payload = raw.slice(markerIndex + base64Marker.length);
+  if (!base64Payload) {
+    return null;
+  }
+
+  try {
+    return Buffer.from(base64Payload, 'base64');
+  } catch (_error) {
+    return null;
+  }
+}
+
 function parseReceiptUpdatePayload(payload) {
   const items = Array.isArray(payload.items) ? payload.items : [];
   if (items.length === 0) {
@@ -146,10 +170,12 @@ async function getSaleById(saleId) {
   }
 
   const itemsResult = await query(
-    `SELECT id, product_id, item_type, description, quantity, unit_price, discount, line_total, membership_id
-     FROM sale_items
-     WHERE sale_id = $1
-     ORDER BY id ASC`,
+    `SELECT si.id, si.product_id, si.item_type, si.description, si.quantity, si.unit_price, si.discount, si.line_total, si.membership_id,
+            COALESCE(p.tax_rate, 0) AS product_tax_rate
+     FROM sale_items si
+     LEFT JOIN products p ON p.id = si.product_id
+     WHERE si.sale_id = $1
+     ORDER BY si.id ASC`,
     [saleId]
   );
 
@@ -316,7 +342,53 @@ salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
       throw createHttpError(404, 'Sale not found');
     }
 
-    const itemRows = (sale.items || []).filter((item) => item.item_type === 'product');
+    const companySettingsResult = await query(
+      `SELECT setting_key, setting_value
+       FROM system_settings
+       WHERE setting_key = ANY($1)
+       ORDER BY setting_key ASC`,
+      [['company_name', 'company_logo_data_url']]
+    );
+    const companySettings = Object.fromEntries(
+      companySettingsResult.rows.map((row) => [row.setting_key, row.setting_value])
+    );
+    const companyName = String(companySettings.company_name || '').trim() || 'RohiPOS';
+    const companyLogoBuffer = parseDataUrlToBuffer(companySettings.company_logo_data_url);
+
+    const itemRows = (sale.items || [])
+      .filter((item) => item.item_type === 'product')
+      .map((item) => {
+        const rate = Number(item.product_tax_rate || 0);
+        const unitPrice = Number(item.unit_price || 0);
+        const quantity = Number(item.quantity || 0);
+        const itemDiscount = Number(item.discount || 0);
+        const grossLineTotal = roundMoney(unitPrice * quantity);
+        const baseUnitPrice = rate > 0 ? roundMoney(unitPrice / (1 + rate / 100)) : unitPrice;
+        const baseLineAmount = roundMoney(baseUnitPrice * quantity);
+        const lineTaxAmount = roundMoney(grossLineTotal - baseLineAmount);
+
+        return {
+          ...item,
+          base_unit_price: baseUnitPrice,
+          base_line_amount: baseLineAmount,
+          line_tax_amount: lineTaxAmount,
+          line_discount_amount: itemDiscount
+        };
+      });
+    const baseSubtotal = roundMoney(
+      itemRows.reduce((sum, item) => sum + Number(item.base_line_amount || 0), 0)
+    );
+    const lineDiscountTotal = roundMoney(
+      itemRows.reduce((sum, item) => sum + Number(item.line_discount_amount || 0), 0)
+    );
+    const globalDiscount = Number(sale.discount || 0);
+    const discountTotal = roundMoney(lineDiscountTotal + globalDiscount);
+    const lineTaxTotal = roundMoney(
+      itemRows.reduce((sum, item) => sum + Number(item.line_tax_amount || 0), 0)
+    );
+    const additionalTax = Number(sale.tax || 0);
+    const taxTotal = roundMoney(lineTaxTotal + additionalTax);
+    const voucherTotal = roundMoney(baseSubtotal - discountTotal + taxTotal);
     const paymentRows = sale.payments || [];
     const paymentMethodLabel = {
       cash: 'Efectivo',
@@ -334,7 +406,19 @@ salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
     );
     doc.pipe(response);
 
-    doc.font('Helvetica-Bold').fontSize(14).text('ROHIPOS', { align: 'center' });
+    if (companyLogoBuffer) {
+      try {
+        doc.image(companyLogoBuffer, {
+          fit: [96, 52],
+          align: 'center'
+        });
+        doc.moveDown(0.25);
+      } catch (_error) {
+        // Keep voucher generation even if logo decoding fails.
+      }
+    }
+
+    doc.font('Helvetica-Bold').fontSize(14).text(companyName, { align: 'center' });
     doc.font('Helvetica').fontSize(9).text('Comprobante de venta', { align: 'center' });
     doc.moveDown(0.6);
 
@@ -347,21 +431,38 @@ salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
     doc.moveDown(0.6);
 
     doc.font('Helvetica-Bold').fontSize(8);
-    doc.text('Producto', 34, doc.y, { width: 100, align: 'left' });
-    doc.text('Cant.', 136, doc.y, { width: 25, align: 'right' });
-    doc.text('Importe', 162, doc.y, { width: 30, align: 'right' });
-    doc.moveDown(0.8);
+    doc.text('Producto', 34, doc.y, { width: 158, align: 'left' });
+    doc.moveDown(0.45);
+    const headerY = doc.y;
+    doc.text('P.Base', 34, headerY, { width: 70, align: 'left', lineBreak: false });
+    doc.text('Cant', 116, headerY, { width: 24, align: 'right', lineBreak: false });
+    doc.text('Impte', 142, headerY, { width: 50, align: 'right' });
+    doc.moveDown(0.7);
     doc.font('Helvetica').fontSize(8);
 
     if (!itemRows.length) {
       doc.text('Sin lineas de producto', { align: 'left' });
     } else {
       itemRows.forEach((item) => {
-        const y = doc.y;
-        doc.text(item.description || '-', 34, y, { width: 100, align: 'left' });
-        doc.text(Number(item.quantity || 0).toFixed(2), 136, y, { width: 25, align: 'right' });
-        doc.text(`C$${Number(item.line_total || 0).toFixed(2)}`, 162, y, { width: 30, align: 'right' });
-        doc.moveDown(0.65);
+        doc.text(item.description || '-', 34, doc.y, { width: 158, align: 'left' });
+        doc.moveDown(0.25);
+
+        const valuesY = doc.y;
+        doc.text(`C$${Number(item.base_unit_price || 0).toFixed(2)}`, 34, valuesY, {
+          width: 70,
+          align: 'left',
+          lineBreak: false
+        });
+        doc.text(Number(item.quantity || 0).toFixed(2), 116, valuesY, {
+          width: 24,
+          align: 'right',
+          lineBreak: false
+        });
+        doc.text(`C$${Number(item.base_line_amount || 0).toFixed(2)}`, 142, valuesY, {
+          width: 50,
+          align: 'right'
+        });
+        doc.moveDown(0.8);
       });
     }
 
@@ -371,18 +472,18 @@ salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
 
     doc.font('Helvetica').fontSize(8);
     doc.text('Subtotal', 34, doc.y, { width: 120, align: 'left' });
-    doc.text(`C$${Number(sale.subtotal || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.text(`C$${baseSubtotal.toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
     doc.moveDown(0.4);
-    doc.text('Descuento', 34, doc.y, { width: 120, align: 'left' });
-    doc.text(`C$${Number(sale.discount || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.text('Desc. total', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${discountTotal.toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
     doc.moveDown(0.4);
-    doc.text('Impuesto', 34, doc.y, { width: 120, align: 'left' });
-    doc.text(`C$${Number(sale.tax || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.text('Imp. total', 34, doc.y, { width: 120, align: 'left' });
+    doc.text(`C$${taxTotal.toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
     doc.moveDown(0.5);
 
     doc.font('Helvetica-Bold').fontSize(10);
     doc.text('TOTAL', 34, doc.y, { width: 120, align: 'left' });
-    doc.text(`C$${Number(sale.total || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.text(`C$${voucherTotal.toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
     doc.moveDown(0.7);
 
     doc.font('Helvetica').fontSize(8).text('Pagos', { align: 'left' });
@@ -396,8 +497,8 @@ salesRouter.get('/:id/voucher/pdf', async (request, response, next) => {
     }
 
     doc.moveDown(0.8);
-    doc.fontSize(8).text('Gracias por su compra', { align: 'center' });
-    doc.text('RohiPOS', { align: 'center' });
+    doc.fontSize(8).text('Gracias por su compra', 34, doc.y, { width: 158, align: 'center' });
+    doc.text(companyName, 34, doc.y, { width: 158, align: 'center' });
 
     doc.end();
   } catch (error) {
