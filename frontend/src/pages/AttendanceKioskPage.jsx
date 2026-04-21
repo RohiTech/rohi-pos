@@ -284,6 +284,25 @@ export function AttendanceKioskPage() {
   }, []);
 
   useEffect(() => {
+    // Keep kiosk route protected when user presses browser back button.
+    window.history.pushState({ kiosk_guard: true }, '', window.location.href);
+
+    const handlePopState = () => {
+      setUnlockModalOpen(true);
+      setUnlockError('');
+      setAdminUsername('');
+      setAdminPassword('');
+      window.history.pushState({ kiosk_guard: true }, '', window.location.href);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       setCurrentDateTime(new Date());
     }, 1000);
