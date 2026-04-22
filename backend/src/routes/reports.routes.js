@@ -3436,6 +3436,345 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/cash-flow/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH product_entries AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(s.total), 0)::numeric(12,2) AS amount
+         FROM sales s
+         WHERE s.status = 'completed'
+           AND s.sold_at::date BETWEEN $1::date AND $2::date
+       ),
+       membership_entries AS (
+         SELECT
+           COALESCE(SUM(membership_amount), 0)::numeric(12,2) AS amount
+         FROM (
+           SELECT COALESCE(p.amount, 0)::numeric(12,2) AS membership_amount
+           FROM payments p
+           WHERE p.membership_id IS NOT NULL
+             AND p.paid_at::date BETWEEN $1::date AND $2::date
+
+           UNION ALL
+
+           SELECT COALESCE(m.amount_paid, 0)::numeric(12,2) AS membership_amount
+           FROM memberships m
+           WHERE m.amount_paid > 0
+             AND m.created_at::date BETWEEN $1::date AND $2::date
+             AND NOT EXISTS (
+               SELECT 1
+               FROM payments p2
+               WHERE p2.membership_id = m.id
+             )
+         ) membership_rows
+       ),
+       routine_entries AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.payment_number LIKE 'DAY-%'
+           AND p.sale_id IS NULL
+           AND p.membership_id IS NULL
+           AND p.paid_at::date BETWEEN $1::date AND $2::date
+       ),
+       expenses AS (
+         SELECT COALESCE(SUM(cm.amount), 0)::numeric(12,2) AS amount
+         FROM cash_movements cm
+         WHERE cm.movement_type = 'expense'
+           AND cm.created_at::date BETWEEN $1::date AND $2::date
+       ),
+       sessions AS (
+         SELECT
+           COUNT(*)::int AS sessions_count,
+           COALESCE(SUM(cs.opening_amount), 0)::numeric(12,2) AS opening_total,
+           COALESCE(SUM(COALESCE(cs.closing_amount, cs.expected_amount, cs.opening_amount)), 0)::numeric(12,2) AS closing_total
+         FROM cash_register_sessions cs
+         WHERE cs.opened_at::date BETWEEN $1::date AND $2::date
+       )
+       SELECT
+         pe.operations AS product_operations,
+         pe.amount AS product_amount,
+         me.amount AS membership_amount,
+         re.operations AS routine_operations,
+         re.amount AS routine_amount,
+         ex.amount AS expense_amount,
+         s.sessions_count,
+         s.opening_total,
+         s.closing_total
+       FROM product_entries pe
+       CROSS JOIN membership_entries me
+       CROSS JOIN routine_entries re
+       CROSS JOIN expenses ex
+       CROSS JOIN sessions s`,
+      [startDate, endDate]
+    );
+
+    const data = result.rows[0] || {};
+    const productAmount = Number(data.product_amount || 0);
+    const membershipAmount = Number(data.membership_amount || 0);
+    const routineAmount = Number(data.routine_amount || 0);
+    const expenseAmount = Number(data.expense_amount || 0);
+    const openingTotal = Number(data.opening_total || 0);
+    const closingTotal = Number(data.closing_total || 0);
+    const totalEntries = productAmount + membershipAmount + routineAmount;
+    const netCashFlow = totalEntries - expenseAmount;
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="flujo_efectivo.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Flujo de Efectivo', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Entradas del periodo', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Productos (ventas): C$${productAmount.toFixed(2)} (${Number(data.product_operations || 0)} ventas)`, 30);
+    doc.text(`Membresias: C$${membershipAmount.toFixed(2)}`, 30);
+    doc.text(`Rutinas diarias: C$${routineAmount.toFixed(2)} (${Number(data.routine_operations || 0)} pagos)`, 30);
+    doc.text(`Total entradas: C$${totalEntries.toFixed(2)}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Salidas del periodo', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Gastos / egresos: C$${expenseAmount.toFixed(2)}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Caja', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Sesiones consideradas: ${Number(data.sessions_count || 0)}`, 30);
+    doc.text(`Caja inicial total: C$${openingTotal.toFixed(2)}`, 30);
+    doc.text(`Caja final total: C$${closingTotal.toFixed(2)}`, 30);
+    doc.text(`Flujo neto (entradas - salidas): C$${netCashFlow.toFixed(2)}`, 30);
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Flujo de Efectivo', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/income-by-payment-method/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const { rows } = await query(
+      `SELECT
+         p.payment_method,
+         COUNT(*)::int AS operations,
+         COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+       FROM payments p
+       WHERE p.paid_at::date BETWEEN $1::date AND $2::date
+       GROUP BY p.payment_method
+       ORDER BY amount DESC`,
+      [startDate, endDate]
+    );
+
+    const methodLabel = {
+      cash: 'Efectivo',
+      transfer: 'Transferencia',
+      card: 'POS',
+      mobile: 'Pago movil',
+      other: 'Otro'
+    };
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ingresos_por_metodo_pago.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ingresos por Metodo de Pago', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Ingreso total cobrado: C$${totalAmount.toFixed(2)}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay ingresos registrados en el rango seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(10);
+      doc.text('Metodo', 20, headerY, { width: 220, align: 'left' });
+      doc.text('Operaciones', 240, headerY, { width: 120, align: 'right' });
+      doc.text('Monto', 360, headerY, { width: 180, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(10);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(methodLabel[row.payment_method] || row.payment_method || 'Sin metodo', 20, y, {
+          width: 220,
+          align: 'left'
+        });
+        doc.text(String(row.operations || 0), 240, y, { width: 120, align: 'right' });
+        doc.text(`C$${Number(row.amount || 0).toFixed(2)}`, 360, y, { width: 180, align: 'right' });
+        doc.moveDown(0.8);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ingresos por Metodo de Pago', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/sales-vs-income/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH billed_sales AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(s.total), 0)::numeric(12,2) AS amount
+         FROM sales s
+         WHERE s.status = 'completed'
+           AND s.sold_at::date BETWEEN $1::date AND $2::date
+       ),
+       collected_income AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.paid_at::date BETWEEN $1::date AND $2::date
+       ),
+       collected_from_sales AS (
+         SELECT COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.sale_id IS NOT NULL
+           AND p.paid_at::date BETWEEN $1::date AND $2::date
+       ),
+       collected_other AS (
+         SELECT COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.sale_id IS NULL
+           AND p.paid_at::date BETWEEN $1::date AND $2::date
+       )
+       SELECT
+         bs.operations AS billed_operations,
+         bs.amount AS billed_amount,
+         ci.operations AS collected_operations,
+         ci.amount AS collected_amount,
+         cfs.amount AS collected_sales_amount,
+         co.amount AS collected_other_amount
+       FROM billed_sales bs
+       CROSS JOIN collected_income ci
+       CROSS JOIN collected_from_sales cfs
+       CROSS JOIN collected_other co`,
+      [startDate, endDate]
+    );
+
+    const data = result.rows[0] || {};
+    const billedAmount = Number(data.billed_amount || 0);
+    const collectedAmount = Number(data.collected_amount || 0);
+    const collectedSalesAmount = Number(data.collected_sales_amount || 0);
+    const collectedOtherAmount = Number(data.collected_other_amount || 0);
+    const gap = collectedAmount - billedAmount;
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ventas_vs_ingresos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ventas vs Ingresos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Comparativo principal', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Ventas facturadas: C$${billedAmount.toFixed(2)} (${Number(data.billed_operations || 0)} ventas)`, 30);
+    doc.text(`Ingresos cobrados: C$${collectedAmount.toFixed(2)} (${Number(data.collected_operations || 0)} cobros)`, 30);
+    doc.text(`Diferencia (ingresos - ventas): C$${gap.toFixed(2)}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Detalle de ingresos cobrados', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Cobrado de ventas POS: C$${collectedSalesAmount.toFixed(2)}`, 30);
+    doc.text(`Cobrado de membresias/rutinas: C$${collectedOtherAmount.toFixed(2)}`, 30);
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ventas vs Ingresos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/membership-card/client/:clientId/pdf', async (req, res, next) => {
   try {
     const clientId = Number.parseInt(req.params.clientId, 10);

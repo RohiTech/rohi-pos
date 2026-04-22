@@ -8,7 +8,15 @@ const reportModules = [
   {
     title: 'Ventas',
     description: 'Reportes para caja, ingresos y rendimiento comercial.',
-    items: ['Ventas diarias', 'Ventas por producto', 'Resumen de caja', 'Ventas por vendedor']
+    items: [
+      'Ventas diarias',
+      'Ventas por producto',
+      'Resumen de caja',
+      'Ventas por vendedor',
+      'Flujo de efectivo',
+      'Ingresos por método de pago',
+      'Ventas vs Ingresos'
+    ]
   },
   {
     title: 'Clientes',
@@ -88,6 +96,9 @@ export function ReportsPage() {
   const [openAttendanceByClientModal, setOpenAttendanceByClientModal] = useState(false);
   const [openAttendanceClientDetailModal, setOpenAttendanceClientDetailModal] = useState(false);
   const [openOperationalStatsModal, setOpenOperationalStatsModal] = useState(false);
+  const [openCashFlowModal, setOpenCashFlowModal] = useState(false);
+  const [openIncomeByMethodModal, setOpenIncomeByMethodModal] = useState(false);
+  const [openSalesVsIncomeModal, setOpenSalesVsIncomeModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: todayDate,
     fechaFin: todayDate,
@@ -217,6 +228,10 @@ export function ReportsPage() {
     accessType: ''
   });
   const [operationalStatsParams, setOperationalStatsParams] = useState({
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate
+  });
+  const [financialParams, setFinancialParams] = useState({
     fechaInicio: firstDayOfCurrentMonth,
     fechaFin: todayDate
   });
@@ -456,6 +471,12 @@ export function ReportsPage() {
   const handleCloseAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(false);
   const handleOpenOperationalStats = () => setOpenOperationalStatsModal(true);
   const handleCloseOperationalStats = () => setOpenOperationalStatsModal(false);
+  const handleOpenCashFlow = () => setOpenCashFlowModal(true);
+  const handleCloseCashFlow = () => setOpenCashFlowModal(false);
+  const handleOpenIncomeByMethod = () => setOpenIncomeByMethodModal(true);
+  const handleCloseIncomeByMethod = () => setOpenIncomeByMethodModal(false);
+  const handleOpenSalesVsIncome = () => setOpenSalesVsIncomeModal(true);
+  const handleCloseSalesVsIncome = () => setOpenSalesVsIncomeModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -598,6 +619,11 @@ export function ReportsPage() {
   const handleOperationalStatsParamsChange = (e) => {
     const { name, value } = e.target;
     setOperationalStatsParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleFinancialParamsChange = (e) => {
+    const { name, value } = e.target;
+    setFinancialParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -1294,6 +1320,102 @@ export function ReportsPage() {
     setOpenOperationalStatsModal(false);
   };
 
+  const handleCashFlowReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: financialParams.fechaInicio,
+      fechaFin: financialParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/cash-flow/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'flujo_efectivo.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenCashFlowModal(false);
+  };
+
+  const handleIncomeByMethodReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: financialParams.fechaInicio,
+      fechaFin: financialParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/income-by-payment-method/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ingresos_por_metodo_pago.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenIncomeByMethodModal(false);
+  };
+
+  const handleSalesVsIncomeReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: financialParams.fechaInicio,
+      fechaFin: financialParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/sales-vs-income/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ventas_vs_ingresos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenSalesVsIncomeModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -1333,6 +1455,27 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenSellerSales}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Flujo de efectivo' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenCashFlow}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ingresos por método de pago' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenIncomeByMethod}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ventas vs Ingresos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenSalesVsIncome}
                     >
                       {report}
                     </button>
@@ -1654,6 +1797,114 @@ export function ReportsPage() {
           </label>
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={handleCloseOperationalStats} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openCashFlowModal} onClose={handleCloseCashFlow}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de flujo de efectivo</h2>
+        <form onSubmit={handleCashFlowReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={financialParams.fechaInicio}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={financialParams.fechaFin}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseCashFlow} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openIncomeByMethodModal} onClose={handleCloseIncomeByMethod}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ingresos por método de pago</h2>
+        <form onSubmit={handleIncomeByMethodReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={financialParams.fechaInicio}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={financialParams.fechaFin}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseIncomeByMethod} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openSalesVsIncomeModal} onClose={handleCloseSalesVsIncome}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas vs ingresos</h2>
+        <form onSubmit={handleSalesVsIncomeReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={financialParams.fechaInicio}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={financialParams.fechaFin}
+              onChange={handleFinancialParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseSalesVsIncome} className="px-3 py-1 rounded bg-gray-200">
               Cancelar
             </button>
             <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
