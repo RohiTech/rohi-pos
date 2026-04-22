@@ -26,7 +26,15 @@ const reportModules = [
   {
     title: 'Membresías',
     description: 'Visión sobre vigencias, renovaciones y saldo.',
-    items: ['Membresías vigentes', 'Membresías por plan', 'Renovaciones próximas', 'Ingresos recurrentes']
+    items: [
+      'Membresías vigentes',
+      'Membresías por plan',
+      'Renovaciones próximas',
+      'Ingresos recurrentes',
+      'Membresías vencidas',
+      'Tasa de renovación',
+      'Ingresos proyectados'
+    ]
   },
   {
     title: 'Inventario',
@@ -41,7 +49,15 @@ const reportModules = [
   {
     title: 'Asistencias',
     description: 'Análisis de check-ins por día y por cliente.',
-    items: ['Asistencias diarias', 'Asistencias por cliente', 'Detalle de marcaciones por cliente']
+    items: [
+      'Asistencias diarias',
+      'Asistencias por cliente',
+      'Detalle de marcaciones por cliente',
+      'Asistencia vs ingresos',
+      'Ocupación por hora',
+      'Clientes activos reales',
+      'Rutina pagada sin asistencia'
+    ]
   },
   {
     title: 'Estadísticas',
@@ -88,6 +104,9 @@ export function ReportsPage() {
   const [openMembershipsByPlanModal, setOpenMembershipsByPlanModal] = useState(false);
   const [openUpcomingRenewalsModal, setOpenUpcomingRenewalsModal] = useState(false);
   const [openRecurringIncomeModal, setOpenRecurringIncomeModal] = useState(false);
+  const [openExpiredMembershipsModal, setOpenExpiredMembershipsModal] = useState(false);
+  const [openRenewalRateModal, setOpenRenewalRateModal] = useState(false);
+  const [openProjectedIncomeModal, setOpenProjectedIncomeModal] = useState(false);
   const [openInventoryCurrentModal, setOpenInventoryCurrentModal] = useState(false);
   const [openLowStockModal, setOpenLowStockModal] = useState(false);
   const [openInventoryMovementsModal, setOpenInventoryMovementsModal] = useState(false);
@@ -95,7 +114,11 @@ export function ReportsPage() {
   const [openAttendanceDailyModal, setOpenAttendanceDailyModal] = useState(false);
   const [openAttendanceByClientModal, setOpenAttendanceByClientModal] = useState(false);
   const [openAttendanceClientDetailModal, setOpenAttendanceClientDetailModal] = useState(false);
+  const [openDailyPassWithoutAttendanceModal, setOpenDailyPassWithoutAttendanceModal] = useState(false);
   const [openOperationalStatsModal, setOpenOperationalStatsModal] = useState(false);
+  const [openAttendanceVsIncomeModal, setOpenAttendanceVsIncomeModal] = useState(false);
+  const [openHourlyOccupancyModal, setOpenHourlyOccupancyModal] = useState(false);
+  const [openRealActiveClientsModal, setOpenRealActiveClientsModal] = useState(false);
   const [openCashFlowModal, setOpenCashFlowModal] = useState(false);
   const [openIncomeByMethodModal, setOpenIncomeByMethodModal] = useState(false);
   const [openSalesVsIncomeModal, setOpenSalesVsIncomeModal] = useState(false);
@@ -184,6 +207,14 @@ export function ReportsPage() {
     status: '',
     planId: '',
     onlyPaid: false
+  });
+  const [membershipKpiParams, setMembershipKpiParams] = useState({
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate
+  });
+  const [projectedIncomeParams, setProjectedIncomeParams] = useState({
+    asOfDate: todayDate,
+    monthsAhead: '3'
   });
   const [inventoryCurrentParams, setInventoryCurrentParams] = useState({
     categoryId: '',
@@ -455,6 +486,12 @@ export function ReportsPage() {
   const handleCloseUpcomingRenewals = () => setOpenUpcomingRenewalsModal(false);
   const handleOpenRecurringIncome = () => setOpenRecurringIncomeModal(true);
   const handleCloseRecurringIncome = () => setOpenRecurringIncomeModal(false);
+  const handleOpenExpiredMemberships = () => setOpenExpiredMembershipsModal(true);
+  const handleCloseExpiredMemberships = () => setOpenExpiredMembershipsModal(false);
+  const handleOpenRenewalRate = () => setOpenRenewalRateModal(true);
+  const handleCloseRenewalRate = () => setOpenRenewalRateModal(false);
+  const handleOpenProjectedIncome = () => setOpenProjectedIncomeModal(true);
+  const handleCloseProjectedIncome = () => setOpenProjectedIncomeModal(false);
   const handleOpenInventoryCurrent = () => setOpenInventoryCurrentModal(true);
   const handleCloseInventoryCurrent = () => setOpenInventoryCurrentModal(false);
   const handleOpenLowStock = () => setOpenLowStockModal(true);
@@ -469,8 +506,16 @@ export function ReportsPage() {
   const handleCloseAttendanceByClient = () => setOpenAttendanceByClientModal(false);
   const handleOpenAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(true);
   const handleCloseAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(false);
+  const handleOpenDailyPassWithoutAttendance = () => setOpenDailyPassWithoutAttendanceModal(true);
+  const handleCloseDailyPassWithoutAttendance = () => setOpenDailyPassWithoutAttendanceModal(false);
   const handleOpenOperationalStats = () => setOpenOperationalStatsModal(true);
   const handleCloseOperationalStats = () => setOpenOperationalStatsModal(false);
+  const handleOpenAttendanceVsIncome = () => setOpenAttendanceVsIncomeModal(true);
+  const handleCloseAttendanceVsIncome = () => setOpenAttendanceVsIncomeModal(false);
+  const handleOpenHourlyOccupancy = () => setOpenHourlyOccupancyModal(true);
+  const handleCloseHourlyOccupancy = () => setOpenHourlyOccupancyModal(false);
+  const handleOpenRealActiveClients = () => setOpenRealActiveClientsModal(true);
+  const handleCloseRealActiveClients = () => setOpenRealActiveClientsModal(false);
   const handleOpenCashFlow = () => setOpenCashFlowModal(true);
   const handleCloseCashFlow = () => setOpenCashFlowModal(false);
   const handleOpenIncomeByMethod = () => setOpenIncomeByMethodModal(true);
@@ -567,6 +612,16 @@ export function ReportsPage() {
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
+  };
+
+  const handleMembershipKpiParamsChange = (e) => {
+    const { name, value } = e.target;
+    setMembershipKpiParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleProjectedIncomeParamsChange = (e) => {
+    const { name, value } = e.target;
+    setProjectedIncomeParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleInventoryCurrentParamsChange = (e) => {
@@ -1050,6 +1105,102 @@ export function ReportsPage() {
     setOpenRecurringIncomeModal(false);
   };
 
+  const handleExpiredMembershipsReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: membershipKpiParams.fechaInicio,
+      fechaFin: membershipKpiParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/expired-memberships/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'membresias_vencidas.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenExpiredMembershipsModal(false);
+  };
+
+  const handleRenewalRateReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      fechaInicio: membershipKpiParams.fechaInicio,
+      fechaFin: membershipKpiParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/renewal-rate/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tasa_renovacion.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenRenewalRateModal(false);
+  };
+
+  const handleProjectedIncomeReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      as_of_date: projectedIncomeParams.asOfDate,
+      months_ahead: projectedIncomeParams.monthsAhead
+    });
+
+    fetch(`http://localhost:3001/api/reports/projected-income/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ingresos_proyectados.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenProjectedIncomeModal(false);
+  };
+
   const handleInventoryCurrentReport = async (e) => {
     e.preventDefault();
     const query = buildQueryString({
@@ -1288,6 +1439,38 @@ export function ReportsPage() {
     setOpenAttendanceClientDetailModal(false);
   };
 
+  const handleDailyPassWithoutAttendanceReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: attendanceDailyParams.fechaInicio,
+      fechaFin: attendanceDailyParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/daily-pass-without-attendance/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rutina_pagada_sin_asistencia.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenDailyPassWithoutAttendanceModal(false);
+  };
+
   const handleOperationalStatsReport = async (e) => {
     e.preventDefault();
     const reportQuery = buildQueryString({
@@ -1318,6 +1501,102 @@ export function ReportsPage() {
       .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
 
     setOpenOperationalStatsModal(false);
+  };
+
+  const handleAttendanceVsIncomeReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: operationalStatsParams.fechaInicio,
+      fechaFin: operationalStatsParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/attendance-vs-income/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'asistencia_vs_ingresos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenAttendanceVsIncomeModal(false);
+  };
+
+  const handleHourlyOccupancyReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: operationalStatsParams.fechaInicio,
+      fechaFin: operationalStatsParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/hourly-occupancy/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ocupacion_por_hora.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenHourlyOccupancyModal(false);
+  };
+
+  const handleRealActiveClientsReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: operationalStatsParams.fechaInicio,
+      fechaFin: operationalStatsParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/real-active-clients/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clientes_activos_reales.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenRealActiveClientsModal(false);
   };
 
   const handleCashFlowReport = async (e) => {
@@ -1535,6 +1814,27 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
+                  ) : report === 'Membresías vencidas' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenExpiredMemberships}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Tasa de renovación' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenRenewalRate}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ingresos proyectados' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenProjectedIncome}
+                    >
+                      {report}
+                    </button>
                   ) : report === 'Inventario actual' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
@@ -1584,10 +1884,38 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
+                  ) : report === 'Rutina pagada sin asistencia' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenDailyPassWithoutAttendance}
+                    >
+                      {report}
+                    </button>
                   ) : report === 'Estadísticas operativas' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenOperationalStats}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Asistencia vs ingresos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenAttendanceVsIncome}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ocupación por hora' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenHourlyOccupancy}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Clientes activos reales' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenRealActiveClients}
                     >
                       {report}
                     </button>
@@ -1770,6 +2098,42 @@ export function ReportsPage() {
         </form>
       </SimpleModal>
 
+      <SimpleModal open={openDailyPassWithoutAttendanceModal} onClose={handleCloseDailyPassWithoutAttendance}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de rutina pagada sin asistencia</h2>
+        <form onSubmit={handleDailyPassWithoutAttendanceReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={attendanceDailyParams.fechaInicio}
+              onChange={handleAttendanceDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={attendanceDailyParams.fechaFin}
+              onChange={handleAttendanceDailyParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseDailyPassWithoutAttendance} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
       <SimpleModal open={openOperationalStatsModal} onClose={handleCloseOperationalStats}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de estadísticas operativas</h2>
         <form onSubmit={handleOperationalStatsReport} className="grid gap-4">
@@ -1833,6 +2197,114 @@ export function ReportsPage() {
           </label>
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={handleCloseCashFlow} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openAttendanceVsIncomeModal} onClose={handleCloseAttendanceVsIncome}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de asistencia vs ingresos</h2>
+        <form onSubmit={handleAttendanceVsIncomeReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={operationalStatsParams.fechaInicio}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={operationalStatsParams.fechaFin}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseAttendanceVsIncome} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openHourlyOccupancyModal} onClose={handleCloseHourlyOccupancy}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ocupación por hora</h2>
+        <form onSubmit={handleHourlyOccupancyReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={operationalStatsParams.fechaInicio}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={operationalStatsParams.fechaFin}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseHourlyOccupancy} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openRealActiveClientsModal} onClose={handleCloseRealActiveClients}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de clientes activos reales</h2>
+        <form onSubmit={handleRealActiveClientsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={operationalStatsParams.fechaInicio}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={operationalStatsParams.fechaFin}
+              onChange={handleOperationalStatsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseRealActiveClients} className="px-3 py-1 rounded bg-gray-200">
               Cancelar
             </button>
             <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
@@ -2711,6 +3183,116 @@ export function ReportsPage() {
               onClick={handleCloseRecurringIncome}
               className="px-3 py-1 rounded bg-gray-200"
             >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openExpiredMembershipsModal} onClose={handleCloseExpiredMemberships}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías vencidas</h2>
+        <form onSubmit={handleExpiredMembershipsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={membershipKpiParams.fechaInicio}
+              onChange={handleMembershipKpiParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={membershipKpiParams.fechaFin}
+              onChange={handleMembershipKpiParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseExpiredMemberships} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openRenewalRateModal} onClose={handleCloseRenewalRate}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de tasa de renovación</h2>
+        <form onSubmit={handleRenewalRateReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={membershipKpiParams.fechaInicio}
+              onChange={handleMembershipKpiParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={membershipKpiParams.fechaFin}
+              onChange={handleMembershipKpiParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseRenewalRate} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openProjectedIncomeModal} onClose={handleCloseProjectedIncome}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ingresos proyectados</h2>
+        <form onSubmit={handleProjectedIncomeReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha base</span>
+            <input
+              type="date"
+              name="asOfDate"
+              value={projectedIncomeParams.asOfDate}
+              onChange={handleProjectedIncomeParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Meses a proyectar</span>
+            <input
+              type="number"
+              name="monthsAhead"
+              value={projectedIncomeParams.monthsAhead}
+              onChange={handleProjectedIncomeParamsChange}
+              min="1"
+              max="12"
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseProjectedIncome} className="px-3 py-1 rounded bg-gray-200">
               Cancelar
             </button>
             <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">

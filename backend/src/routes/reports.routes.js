@@ -2146,6 +2146,318 @@ reportsRouter.get('/recurring-income/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/expired-memberships/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const { rows } = await query(
+      `SELECT
+         m.id,
+         m.client_id,
+         m.membership_number,
+         m.end_date,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         mp.name AS plan_name,
+         GREATEST((CURRENT_DATE - m.end_date), 0)::int AS days_expired
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       LEFT JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE m.end_date::date BETWEEN $1::date AND $2::date
+         AND NOT EXISTS (
+           SELECT 1
+           FROM memberships m2
+           WHERE m2.client_id = m.client_id
+             AND (m2.start_date > m.end_date OR m2.id > m.id)
+         )
+       ORDER BY m.end_date ASC, c.last_name ASC, c.first_name ASC`,
+      [startDate, endDate]
+    );
+
+    const totalAtRisk = rows.reduce(
+      (sum, row) => sum + Math.max(Number(row.price || 0) - Number(row.discount || 0), 0),
+      0
+    );
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias_vencidas.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Membresias Vencidas', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Clientes sin renovar: ${rows.length} | Monto en riesgo: C$${totalAtRisk.toFixed(2)}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay membresias vencidas sin renovar en el rango seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 180, align: 'left' });
+      doc.text('Membresia', 200, headerY, { width: 90, align: 'left' });
+      doc.text('Plan', 290, headerY, { width: 95, align: 'left' });
+      doc.text('Vencio', 385, headerY, { width: 65, align: 'center' });
+      doc.text('Dias', 450, headerY, { width: 35, align: 'right' });
+      doc.text('Monto', 485, headerY, { width: 60, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        const amountAtRisk = Math.max(Number(row.price || 0) - Number(row.discount || 0), 0);
+
+        doc.text(clientLabel, 20, y, { width: 180, align: 'left' });
+        doc.text(row.membership_number || '--', 200, y, { width: 90, align: 'left' });
+        doc.text(row.plan_name || '--', 290, y, { width: 95, align: 'left' });
+        doc.text(new Date(row.end_date).toLocaleDateString('es-NI'), 385, y, { width: 65, align: 'center' });
+        doc.text(String(Number(row.days_expired || 0)), 450, y, { width: 35, align: 'right' });
+        doc.text(`C$${amountAtRisk.toFixed(2)}`, 485, y, { width: 60, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Membresias Vencidas', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/renewal-rate/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH expired_base AS (
+         SELECT m.id, m.client_id, m.end_date
+         FROM memberships m
+         WHERE m.end_date::date BETWEEN $1::date AND $2::date
+       ),
+       renewals AS (
+         SELECT eb.id
+         FROM expired_base eb
+         WHERE EXISTS (
+           SELECT 1
+           FROM memberships m2
+           WHERE m2.client_id = eb.client_id
+             AND m2.start_date > eb.end_date
+         )
+       )
+       SELECT
+         (SELECT COUNT(*)::int FROM expired_base) AS eligible_count,
+         (SELECT COUNT(*)::int FROM renewals) AS renewed_count`,
+      [startDate, endDate]
+    );
+
+    const data = result.rows[0] || {};
+    const eligible = Number(data.eligible_count || 0);
+    const renewed = Number(data.renewed_count || 0);
+    const notRenewed = Math.max(eligible - renewed, 0);
+    const renewalRate = eligible > 0 ? (renewed / eligible) * 100 : 0;
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="tasa_renovacion.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Tasa de Renovacion', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('KPI principal', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Clientes elegibles para renovar: ${eligible}`, 30);
+    doc.text(`Clientes que renovaron: ${renewed}`, 30);
+    doc.text(`Clientes que no renovaron: ${notRenewed}`, 30);
+    doc.text(`Tasa de renovacion: ${renewalRate.toFixed(2)}%`, 30);
+    doc.moveDown();
+
+    let interpretation = 'Sin datos suficientes para medir la renovación.';
+    if (eligible > 0) {
+      if (renewalRate >= 70) {
+        interpretation = 'Lectura: Excelente retencion de clientes.';
+      } else if (renewalRate >= 40) {
+        interpretation = 'Lectura: Retencion intermedia, con espacio de mejora.';
+      } else {
+        interpretation = 'Lectura: Retencion baja, hay fuga importante de clientes.';
+      }
+    }
+    doc.font('Helvetica-Bold').fontSize(11).text(interpretation, 20);
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Tasa de Renovacion', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/projected-income/pdf', async (req, res, next) => {
+  try {
+    const { as_of_date: asOfDateRaw, months_ahead: monthsAheadRaw } = req.query;
+
+    const asOfDate = String(asOfDateRaw || new Date().toISOString().slice(0, 10)).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
+    }
+
+    const monthsAhead = monthsAheadRaw ? Number.parseInt(String(monthsAheadRaw), 10) : 3;
+    if (!Number.isInteger(monthsAhead) || monthsAhead < 1 || monthsAhead > 12) {
+      return res.status(400).json({ message: 'months_ahead debe ser un entero entre 1 y 12' });
+    }
+
+    const projectionResult = await query(
+      `WITH active_memberships AS (
+         SELECT
+           m.client_id,
+           m.plan_id,
+           m.end_date,
+           GREATEST((m.price - m.discount), 0)::numeric(12,2) AS expected_amount
+         FROM memberships m
+         WHERE m.status = 'active'
+           AND m.start_date <= $1::date
+           AND m.end_date >= $1::date
+       ),
+       projection_window AS (
+         SELECT
+           to_char(date_trunc('month', am.end_date::timestamp), 'YYYY-MM') AS projection_month,
+           COUNT(*)::int AS memberships_count,
+           COALESCE(SUM(am.expected_amount), 0)::numeric(12,2) AS projected_amount
+         FROM active_memberships am
+         WHERE am.end_date <= ($1::date + ($2 * INTERVAL '1 month'))
+         GROUP BY to_char(date_trunc('month', am.end_date::timestamp), 'YYYY-MM')
+       )
+       SELECT
+         pw.projection_month,
+         pw.memberships_count,
+         pw.projected_amount
+       FROM projection_window pw
+       ORDER BY pw.projection_month ASC`,
+      [asOfDate, monthsAhead]
+    );
+
+    const totalsResult = await query(
+      `SELECT
+         COUNT(*)::int AS active_memberships,
+         COALESCE(SUM(GREATEST(m.price - m.discount, 0)), 0)::numeric(12,2) AS active_portfolio_amount
+       FROM memberships m
+       WHERE m.status = 'active'
+         AND m.start_date <= $1::date
+         AND m.end_date >= $1::date`,
+      [asOfDate]
+    );
+
+    const rows = projectionResult.rows || [];
+    const totals = totalsResult.rows[0] || {};
+    const projectedTotal = rows.reduce((sum, row) => sum + Number(row.projected_amount || 0), 0);
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ingresos_proyectados.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ingresos Proyectados', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Fecha base: ${asOfDate}  Horizonte: ${monthsAhead} meses`, 20);
+    doc.text(
+      `Membresias activas base: ${Number(totals.active_memberships || 0)} | Monto cartera activa: C$${Number(
+        totals.active_portfolio_amount || 0
+      ).toFixed(2)}`,
+      20
+    );
+    doc.text(`Ingreso proyectado del horizonte: C$${projectedTotal.toFixed(2)}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay vencimientos de membresias activas dentro del horizonte seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(10);
+      doc.text('Mes proyectado', 20, headerY, { width: 180, align: 'left' });
+      doc.text('Membresias', 240, headerY, { width: 120, align: 'right' });
+      doc.text('Ingreso proyectado', 360, headerY, { width: 180, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(10);
+      rows.forEach((row) => {
+        const y = doc.y;
+        doc.text(String(row.projection_month || '--'), 20, y, { width: 180, align: 'left' });
+        doc.text(String(Number(row.memberships_count || 0)), 240, y, { width: 120, align: 'right' });
+        doc.text(`C$${Number(row.projected_amount || 0).toFixed(2)}`, 360, y, { width: 180, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ingresos Proyectados', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/inventory-current/pdf', async (req, res, next) => {
   try {
     const {
@@ -3161,6 +3473,114 @@ reportsRouter.get('/attendance-client-detail/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/daily-pass-without-attendance/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `SELECT
+         p.id,
+         p.payment_number,
+         p.paid_at,
+         p.amount,
+         p.payment_method,
+         p.reference,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         COALESCE(c.phone, '') AS phone
+       FROM payments p
+       INNER JOIN clients c ON c.id = p.client_id
+       WHERE p.payment_number LIKE 'DAY-%'
+         AND p.sale_id IS NULL
+         AND p.membership_id IS NULL
+         AND p.client_id IS NOT NULL
+         AND p.paid_at::date BETWEEN $1::date AND $2::date
+         AND NOT EXISTS (
+           SELECT 1
+           FROM checkins ch
+           WHERE ch.client_id = p.client_id
+             AND ch.checked_in_at::date = p.paid_at::date
+         )
+       ORDER BY p.paid_at DESC, p.id DESC
+       LIMIT 1500`,
+      [startDate, endDate]
+    );
+
+    const rows = result.rows;
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const paymentMethodLabel = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      mobile: 'Pago movil',
+      other: 'Otro'
+    };
+
+    const doc = new PDFDocument({ margin: 32, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="rutina_pagada_sin_asistencia.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(17).text('Reporte de Rutina Pagada sin Asistencia', { align: 'center' });
+    doc.moveDown(0.7);
+    doc.fontSize(11).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Registros: ${rows.length} | Monto total: C$${totalAmount.toFixed(2)}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.text('No hay pagos de rutina sin asistencia en el periodo seleccionado.');
+    } else {
+      rows.forEach((row, index) => {
+        const paidAt = row.paid_at ? new Date(row.paid_at).toLocaleString('es-NI') : '--';
+        const clientName = `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Sin nombre';
+        const clientLabel = `${row.client_code || '--'} - ${clientName}`;
+        const method = paymentMethodLabel[row.payment_method] || row.payment_method || 'Sin metodo';
+        const reference = String(row.reference || '').trim() || '--';
+        const phone = String(row.phone || '').trim() || '--';
+
+        doc.font('Helvetica-Bold').fontSize(10).text(`${index + 1}. ${clientLabel}`, 20);
+        doc.font('Helvetica').fontSize(9.5).text(
+          `Fecha pago: ${paidAt} | Recibo: ${row.payment_number || row.id} | Metodo: ${method} | Monto: C$${Number(row.amount || 0).toFixed(2)}`,
+          30
+        );
+        doc.text(`Telefono: ${phone} | Referencia: ${reference}`, 30);
+        doc.moveDown(0.5);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 86;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 32, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 32, bottom + 12, {
+        align: 'left'
+      });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 32, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Rutina Pagada sin Asistencia', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 112, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/operational-stats/pdf', async (req, res, next) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
@@ -3252,6 +3672,363 @@ reportsRouter.get('/operational-stats/pdf', async (req, res, next) => {
       doc.fontSize(9).text('Reporte de Estadisticas Operativas', 1, bottom, { align: 'center' });
       doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
       doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/attendance-vs-income/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH checkins_summary AS (
+         SELECT
+           COUNT(*) FILTER (WHERE ch.status = 'allowed')::int AS entries,
+           COUNT(DISTINCT ch.client_id) FILTER (WHERE ch.status = 'allowed')::int AS unique_clients
+         FROM checkins ch
+         WHERE ch.checked_in_at::date BETWEEN $1::date AND $2::date
+       ),
+       pos_sales AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(s.total), 0)::numeric(12,2) AS amount
+         FROM sales s
+         WHERE s.status = 'completed'
+           AND s.sold_at::date BETWEEN $1::date AND $2::date
+       ),
+       membership_income AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(income_amount), 0)::numeric(12,2) AS amount
+         FROM (
+           SELECT COALESCE(p.amount, 0)::numeric(12,2) AS income_amount
+           FROM payments p
+           WHERE p.membership_id IS NOT NULL
+             AND p.paid_at::date BETWEEN $1::date AND $2::date
+
+           UNION ALL
+
+           SELECT COALESCE(m.amount_paid, 0)::numeric(12,2) AS income_amount
+           FROM memberships m
+           WHERE m.amount_paid > 0
+             AND m.created_at::date BETWEEN $1::date AND $2::date
+             AND NOT EXISTS (
+               SELECT 1
+               FROM payments p2
+               WHERE p2.membership_id = m.id
+             )
+         ) income_rows
+       ),
+       daily_pass_income AS (
+         SELECT
+           COUNT(*)::int AS operations,
+           COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.payment_number LIKE 'DAY-%'
+           AND p.sale_id IS NULL
+           AND p.membership_id IS NULL
+           AND p.paid_at::date BETWEEN $1::date AND $2::date
+       )
+       SELECT
+         cs.entries,
+         cs.unique_clients,
+         ps.operations AS pos_operations,
+         ps.amount AS pos_amount,
+         mi.operations AS membership_operations,
+         mi.amount AS membership_amount,
+         dp.operations AS daily_pass_operations,
+         dp.amount AS daily_pass_amount
+       FROM checkins_summary cs
+       CROSS JOIN pos_sales ps
+       CROSS JOIN membership_income mi
+       CROSS JOIN daily_pass_income dp`,
+      [startDate, endDate]
+    );
+
+    const data = result.rows[0] || {};
+    const entries = Number(data.entries || 0);
+    const uniqueClients = Number(data.unique_clients || 0);
+    const posAmount = Number(data.pos_amount || 0);
+    const membershipAmount = Number(data.membership_amount || 0);
+    const dailyPassAmount = Number(data.daily_pass_amount || 0);
+    const totalIncome = posAmount + membershipAmount + dailyPassAmount;
+    const incomePerEntry = entries > 0 ? totalIncome / entries : 0;
+    const incomePerClient = uniqueClients > 0 ? totalIncome / uniqueClients : 0;
+
+    let insight = 'Sin suficientes datos para interpretar el periodo.';
+    if (entries > 0 && totalIncome > 0) {
+      if (entries >= 20 && incomePerEntry < 5) {
+        insight = 'Lectura: Hay alta asistencia con bajo ingreso por entrada.';
+      } else if (entries <= 10 && incomePerEntry >= 20) {
+        insight = 'Lectura: Se genera buen ingreso aun con pocos clientes.';
+      } else {
+        insight = 'Lectura: Asistencia e ingreso se mantienen en un balance intermedio.';
+      }
+    }
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="asistencia_vs_ingresos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Asistencia vs Ingresos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Asistencia', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Personas que entraron (registros permitidos): ${entries}`, 30);
+    doc.text(`Clientes unicos que asistieron: ${uniqueClients}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Ingresos generados', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Ventas POS: C$${posAmount.toFixed(2)} (${Number(data.pos_operations || 0)} operaciones)`, 30);
+    doc.text(`Membresias: C$${membershipAmount.toFixed(2)} (${Number(data.membership_operations || 0)} operaciones)`, 30);
+    doc.text(`Rutina diaria: C$${dailyPassAmount.toFixed(2)} (${Number(data.daily_pass_operations || 0)} operaciones)`, 30);
+    doc.text(`Ingreso total: C$${totalIncome.toFixed(2)}`, 30);
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').fontSize(12).text('Indicadores', 20);
+    doc.font('Helvetica').fontSize(11);
+    doc.text(`Ingreso por entrada: C$${incomePerEntry.toFixed(2)}`, 30);
+    doc.text(`Ingreso por cliente unico: C$${incomePerClient.toFixed(2)}`, 30);
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(11).text(insight, 20);
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, {
+        align: 'left'
+      });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Asistencia vs Ingresos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/hourly-occupancy/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `WITH hours AS (
+         SELECT generate_series(0, 23) AS hour_number
+       )
+       SELECT
+         h.hour_number,
+         COALESCE(COUNT(ch.id), 0)::int AS entries,
+         COALESCE(COUNT(DISTINCT ch.client_id), 0)::int AS unique_clients
+       FROM hours h
+       LEFT JOIN checkins ch
+         ON EXTRACT(HOUR FROM ch.checked_in_at) = h.hour_number
+        AND ch.status = 'allowed'
+        AND ch.checked_in_at::date BETWEEN $1::date AND $2::date
+       GROUP BY h.hour_number
+       ORDER BY h.hour_number ASC`,
+      [startDate, endDate]
+    );
+
+    const rows = result.rows || [];
+    const peak = rows.reduce(
+      (best, row) => (Number(row.entries || 0) > Number(best.entries || 0) ? row : best),
+      { hour_number: 0, entries: 0 }
+    );
+    const totalEntries = rows.reduce((sum, row) => sum + Number(row.entries || 0), 0);
+    const avgPerHour = rows.length > 0 ? totalEntries / rows.length : 0;
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ocupacion_por_hora.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ocupacion por Hora', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Hora pico: ${String(peak.hour_number || 0).padStart(2, '0')}:00 (${Number(peak.entries || 0)} ingresos)`, 20);
+    doc.text(`Promedio por hora: ${avgPerHour.toFixed(2)} ingresos`, 20);
+    doc.moveDown();
+
+    const headerY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Hora', 20, headerY, { width: 120, align: 'left' });
+    doc.text('Ingresos', 220, headerY, { width: 120, align: 'right' });
+    doc.text('Clientes unicos', 360, headerY, { width: 180, align: 'right' });
+    doc.moveDown(1);
+
+    doc.font('Helvetica').fontSize(10);
+    rows.forEach((row) => {
+      const y = doc.y;
+      const hourLabel = `${String(Number(row.hour_number || 0)).padStart(2, '0')}:00`;
+      doc.text(hourLabel, 20, y, { width: 120, align: 'left' });
+      doc.text(String(Number(row.entries || 0)), 220, y, { width: 120, align: 'right' });
+      doc.text(String(Number(row.unique_clients || 0)), 360, y, { width: 180, align: 'right' });
+      doc.moveDown(0.7);
+    });
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, {
+        align: 'left'
+      });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ocupacion por Hora', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/real-active-clients/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const result = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         COUNT(ch.id)::int AS attendance_count,
+         MAX(ch.checked_in_at) AS last_checkin_at,
+         lm.plan_name,
+         lm.membership_status
+       FROM clients c
+       INNER JOIN checkins ch
+         ON ch.client_id = c.id
+        AND ch.status = 'allowed'
+        AND ch.checked_in_at::date BETWEEN $1::date AND $2::date
+       LEFT JOIN LATERAL (
+         SELECT
+           mp.name AS plan_name,
+           m.status AS membership_status
+         FROM memberships m
+         LEFT JOIN membership_plans mp ON mp.id = m.plan_id
+         WHERE m.client_id = c.id
+         ORDER BY m.end_date DESC, m.id DESC
+         LIMIT 1
+       ) lm ON TRUE
+       GROUP BY c.id, c.client_code, c.first_name, c.last_name, lm.plan_name, lm.membership_status
+       ORDER BY attendance_count DESC, last_checkin_at DESC
+       LIMIT 1000`,
+      [startDate, endDate]
+    );
+
+    const rows = result.rows || [];
+    const activeClientsCount = rows.length;
+    const activeWithMembership = rows.filter((row) => String(row.membership_status || '').toLowerCase() === 'active').length;
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const doc = new PDFDocument({ margin: 32, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="clientes_activos_reales.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Clientes Activos Reales', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Clientes activos reales (asistieron): ${activeClientsCount}`, 20);
+    doc.text(`Activos con membresia vigente: ${activeWithMembership}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay clientes con asistencias permitidas en el periodo seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(8.5);
+      doc.text('Cliente', 20, headerY, { width: 185, align: 'left' });
+      doc.text('Asistencias', 205, headerY, { width: 65, align: 'right' });
+      doc.text('Ultimo ingreso', 270, headerY, { width: 120, align: 'right' });
+      doc.text('Plan', 390, headerY, { width: 105, align: 'left' });
+      doc.text('Estado memb.', 495, headerY, { width: 65, align: 'right' });
+      doc.moveDown(0.9);
+
+      doc.font('Helvetica').fontSize(8.5);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || '--'} - ${row.first_name || ''} ${row.last_name || ''}`.trim();
+        doc.text(clientLabel || 'Sin nombre', 20, y, { width: 185, align: 'left' });
+        doc.text(String(Number(row.attendance_count || 0)), 205, y, { width: 65, align: 'right' });
+        doc.text(
+          row.last_checkin_at ? new Date(row.last_checkin_at).toLocaleString('es-NI') : '--',
+          270,
+          y,
+          { width: 120, align: 'right' }
+        );
+        doc.text(row.plan_name || '--', 390, y, { width: 105, align: 'left' });
+        doc.text(normalizeMembershipStatusLabel(row.membership_status || '--'), 495, y, {
+          width: 65,
+          align: 'right'
+        });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 86;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 32, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 32, bottom + 12, {
+        align: 'left'
+      });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 32, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Clientes Activos Reales', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 112, bottom, { align: 'left' });
     }
 
     doc.end();
