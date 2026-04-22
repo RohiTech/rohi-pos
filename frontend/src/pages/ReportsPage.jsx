@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react';
-import { DataPanel } from '../components/DataPanel';
-import { PageHeader } from '../components/PageHeader';
 import SimpleModal from '../components/SimpleModal';
 import { apiGet, authToken, buildQueryString } from '../lib/api';
 
@@ -98,6 +96,7 @@ function getCurrentMonthString() {
 export function ReportsPage() {
   const todayDate = getTodayDateString();
   const firstDayOfCurrentMonth = getFirstDayOfCurrentMonthDateString();
+  const [expandedModule, setExpandedModule] = useState(reportModules[0]?.title ?? '');
 
   const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
   const [openProductSalesModal, setOpenProductSalesModal] = useState(false);
@@ -622,6 +621,9 @@ export function ReportsPage() {
   const handleCloseTopProducts = () => setOpenTopProductsModal(false);
   const handleOpenSalesByHour = () => setOpenSalesByHourModal(true);
   const handleCloseSalesByHour = () => setOpenSalesByHourModal(false);
+  const handleToggleModule = (moduleTitle) => {
+    setExpandedModule((currentModule) => (currentModule === moduleTitle ? '' : moduleTitle));
+  };
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -1953,18 +1955,27 @@ export function ReportsPage() {
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Reportes"
-        title="Menú de reportes por módulo"
-        description="Accede rápidamente a los reportes más importantes de cada módulo de la plataforma."
-      />
-
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4">
         {reportModules.map((module) => (
-          <DataPanel key={module.title} title={module.title} subtitle={module.description}>
-            <ul className="grid gap-3">
-              {module.items.map((report) => (
-                <li key={report} className="rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
+          <section key={module.title} className="overflow-hidden rounded-[1.75rem] border border-brand-sand/70 bg-white shadow-panel">
+            <button
+              type="button"
+              onClick={() => handleToggleModule(module.title)}
+              aria-expanded={expandedModule === module.title}
+              className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
+            >
+              <div>
+                <h3 className="text-xl font-semibold text-brand-forest">{module.title}</h3>
+                <p className="mt-1 text-sm text-brand-forest/70">{module.description}</p>
+              </div>
+              <span className="text-2xl font-semibold text-brand-forest">{expandedModule === module.title ? '-' : '+'}</span>
+            </button>
+
+            {expandedModule === module.title ? (
+              <div className="border-t border-brand-sand/70 px-5 pb-5 pt-4">
+                <ul className="grid gap-3">
+                  {module.items.map((report) => (
+                    <li key={report} className="rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
                   {report === 'Ventas diarias' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
@@ -2199,10 +2210,12 @@ export function ReportsPage() {
                   ) : (
                     <p className="font-semibold text-brand-forest">{report}</p>
                   )}
-                </li>
-              ))}
-            </ul>
-          </DataPanel>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
         ))}
       </div>
 
