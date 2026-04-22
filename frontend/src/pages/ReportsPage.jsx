@@ -11,14 +11,9 @@ const reportModules = [
     items: [
       'Ventas diarias',
       'Ventas por producto',
-      'Top clientes',
-      'Productos más vendidos',
       'Ventas por horario',
       'Resumen de caja',
-      'Ventas por vendedor',
-      'Flujo de efectivo',
-      'Ingresos por método de pago',
-      'Ventas vs Ingresos'
+      'Ventas por vendedor'
     ]
   },
   {
@@ -29,7 +24,8 @@ const reportModules = [
       'Clientes nuevos',
       'Clientes inactivos',
       'Clientes que no han venido en X días',
-      'Membresías por cliente'
+      'Membresías por cliente',
+      'Top clientes'
     ]
   },
   {
@@ -53,8 +49,14 @@ const reportModules = [
       'Inventario actual',
       'Productos bajos en stock',
       'Movimientos de inventario',
-      'Kardex de producto'
+      'Kardex de producto',
+      'Productos más vendidos'
     ]
+  },
+  {
+    title: 'Financieros',
+    description: 'Reportes enfocados en flujo de caja e ingresos por método de pago.',
+    items: ['Flujo de efectivo', 'Ingresos por método de pago']
   },
   {
     title: 'Asistencias',
@@ -68,11 +70,6 @@ const reportModules = [
       'Clientes activos reales',
       'Rutina pagada sin asistencia'
     ]
-  },
-  {
-    title: 'Estadísticas',
-    description: 'KPIs operativos para tomar decisiones rápidas.',
-    items: ['Estadísticas operativas']
   }
 ];
 
@@ -127,13 +124,11 @@ export function ReportsPage() {
   const [openAttendanceByClientModal, setOpenAttendanceByClientModal] = useState(false);
   const [openAttendanceClientDetailModal, setOpenAttendanceClientDetailModal] = useState(false);
   const [openDailyPassWithoutAttendanceModal, setOpenDailyPassWithoutAttendanceModal] = useState(false);
-  const [openOperationalStatsModal, setOpenOperationalStatsModal] = useState(false);
   const [openAttendanceVsIncomeModal, setOpenAttendanceVsIncomeModal] = useState(false);
   const [openHourlyOccupancyModal, setOpenHourlyOccupancyModal] = useState(false);
   const [openRealActiveClientsModal, setOpenRealActiveClientsModal] = useState(false);
   const [openCashFlowModal, setOpenCashFlowModal] = useState(false);
   const [openIncomeByMethodModal, setOpenIncomeByMethodModal] = useState(false);
-  const [openSalesVsIncomeModal, setOpenSalesVsIncomeModal] = useState(false);
   const [openTopClientsModal, setOpenTopClientsModal] = useState(false);
   const [openTopProductsModal, setOpenTopProductsModal] = useState(false);
   const [openSalesByHourModal, setOpenSalesByHourModal] = useState(false);
@@ -611,8 +606,6 @@ export function ReportsPage() {
   const handleCloseAttendanceClientDetail = () => setOpenAttendanceClientDetailModal(false);
   const handleOpenDailyPassWithoutAttendance = () => setOpenDailyPassWithoutAttendanceModal(true);
   const handleCloseDailyPassWithoutAttendance = () => setOpenDailyPassWithoutAttendanceModal(false);
-  const handleOpenOperationalStats = () => setOpenOperationalStatsModal(true);
-  const handleCloseOperationalStats = () => setOpenOperationalStatsModal(false);
   const handleOpenAttendanceVsIncome = () => setOpenAttendanceVsIncomeModal(true);
   const handleCloseAttendanceVsIncome = () => setOpenAttendanceVsIncomeModal(false);
   const handleOpenHourlyOccupancy = () => setOpenHourlyOccupancyModal(true);
@@ -623,8 +616,6 @@ export function ReportsPage() {
   const handleCloseCashFlow = () => setOpenCashFlowModal(false);
   const handleOpenIncomeByMethod = () => setOpenIncomeByMethodModal(true);
   const handleCloseIncomeByMethod = () => setOpenIncomeByMethodModal(false);
-  const handleOpenSalesVsIncome = () => setOpenSalesVsIncomeModal(true);
-  const handleCloseSalesVsIncome = () => setOpenSalesVsIncomeModal(false);
   const handleOpenTopClients = () => setOpenTopClientsModal(true);
   const handleCloseTopClients = () => setOpenTopClientsModal(false);
   const handleOpenTopProducts = () => setOpenTopProductsModal(true);
@@ -1702,38 +1693,6 @@ export function ReportsPage() {
     setOpenDailyPassWithoutAttendanceModal(false);
   };
 
-  const handleOperationalStatsReport = async (e) => {
-    e.preventDefault();
-    const reportQuery = buildQueryString({
-      fechaInicio: operationalStatsParams.fechaInicio,
-      fechaFin: operationalStatsParams.fechaFin
-    });
-
-    fetch(`http://localhost:3001/api/reports/operational-stats/pdf${reportQuery}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${authToken}`
-      }
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('No se pudo descargar el PDF');
-        return response.blob();
-      })
-      .then((blob) => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'estadisticas_operativas.pdf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      })
-      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
-
-    setOpenOperationalStatsModal(false);
-  };
-
   const handleAttendanceVsIncomeReport = async (e) => {
     e.preventDefault();
     const reportQuery = buildQueryString({
@@ -1892,38 +1851,6 @@ export function ReportsPage() {
       .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
 
     setOpenIncomeByMethodModal(false);
-  };
-
-  const handleSalesVsIncomeReport = async (e) => {
-    e.preventDefault();
-    const reportQuery = buildQueryString({
-      fechaInicio: financialParams.fechaInicio,
-      fechaFin: financialParams.fechaFin
-    });
-
-    fetch(`http://localhost:3001/api/reports/sales-vs-income/pdf${reportQuery}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${authToken}`
-      }
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('No se pudo descargar el PDF');
-        return response.blob();
-      })
-      .then((blob) => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ventas_vs_ingresos.pdf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      })
-      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
-
-    setOpenSalesVsIncomeModal(false);
   };
 
   const handleTopClientsReport = async (e) => {
@@ -2101,13 +2028,6 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
-                  ) : report === 'Ventas vs Ingresos' ? (
-                    <button
-                      className="font-semibold text-brand-forest hover:underline"
-                      onClick={handleOpenSalesVsIncome}
-                    >
-                      {report}
-                    </button>
                   ) : report === 'Clientes activos' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
@@ -2252,13 +2172,6 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenDailyPassWithoutAttendance}
-                    >
-                      {report}
-                    </button>
-                  ) : report === 'Estadísticas operativas' ? (
-                    <button
-                      className="font-semibold text-brand-forest hover:underline"
-                      onClick={handleOpenOperationalStats}
                     >
                       {report}
                     </button>
@@ -2498,42 +2411,6 @@ export function ReportsPage() {
         </form>
       </SimpleModal>
 
-      <SimpleModal open={openOperationalStatsModal} onClose={handleCloseOperationalStats}>
-        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de estadísticas operativas</h2>
-        <form onSubmit={handleOperationalStatsReport} className="grid gap-4">
-          <label className="grid gap-1">
-            <span className="text-sm font-semibold">Fecha inicio</span>
-            <input
-              type="date"
-              name="fechaInicio"
-              value={operationalStatsParams.fechaInicio}
-              onChange={handleOperationalStatsParamsChange}
-              required
-              className="border rounded px-2 py-1"
-            />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-sm font-semibold">Fecha fin</span>
-            <input
-              type="date"
-              name="fechaFin"
-              value={operationalStatsParams.fechaFin}
-              onChange={handleOperationalStatsParamsChange}
-              required
-              className="border rounded px-2 py-1"
-            />
-          </label>
-          <div className="flex gap-2 justify-end mt-2">
-            <button type="button" onClick={handleCloseOperationalStats} className="px-3 py-1 rounded bg-gray-200">
-              Cancelar
-            </button>
-            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
-              Ver reporte
-            </button>
-          </div>
-        </form>
-      </SimpleModal>
-
       <SimpleModal open={openCashFlowModal} onClose={handleCloseCashFlow}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de flujo de efectivo</h2>
         <form onSubmit={handleCashFlowReport} className="grid gap-4">
@@ -2705,42 +2582,6 @@ export function ReportsPage() {
           </label>
           <div className="flex gap-2 justify-end mt-2">
             <button type="button" onClick={handleCloseIncomeByMethod} className="px-3 py-1 rounded bg-gray-200">
-              Cancelar
-            </button>
-            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
-              Ver reporte
-            </button>
-          </div>
-        </form>
-      </SimpleModal>
-
-      <SimpleModal open={openSalesVsIncomeModal} onClose={handleCloseSalesVsIncome}>
-        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas vs ingresos</h2>
-        <form onSubmit={handleSalesVsIncomeReport} className="grid gap-4">
-          <label className="grid gap-1">
-            <span className="text-sm font-semibold">Fecha inicio</span>
-            <input
-              type="date"
-              name="fechaInicio"
-              value={financialParams.fechaInicio}
-              onChange={handleFinancialParamsChange}
-              required
-              className="border rounded px-2 py-1"
-            />
-          </label>
-          <label className="grid gap-1">
-            <span className="text-sm font-semibold">Fecha fin</span>
-            <input
-              type="date"
-              name="fechaFin"
-              value={financialParams.fechaFin}
-              onChange={handleFinancialParamsChange}
-              required
-              className="border rounded px-2 py-1"
-            />
-          </label>
-          <div className="flex gap-2 justify-end mt-2">
-            <button type="button" onClick={handleCloseSalesVsIncome} className="px-3 py-1 rounded bg-gray-200">
               Cancelar
             </button>
             <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
