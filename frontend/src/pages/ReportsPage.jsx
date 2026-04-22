@@ -5,6 +5,7 @@ import { apiGet, authToken, buildQueryString } from '../lib/api';
 const reportModules = [
   {
     title: 'Ventas',
+    icon: 'point_of_sale',
     description: 'Reportes para caja, ingresos y rendimiento comercial.',
     items: [
       'Ventas diarias',
@@ -91,6 +92,15 @@ function getCurrentMonthString() {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+}
+
+function getModuleIcon(moduleTitle) {
+  if (moduleTitle === 'Ventas') return 'point_of_sale';
+  if (moduleTitle === 'Clientes') return 'group';
+  if (moduleTitle === 'Inventario') return 'inventory_2';
+  if (moduleTitle === 'Financieros') return 'payments';
+  if (moduleTitle === 'Asistencias') return 'how_to_reg';
+  return 'card_membership';
 }
 
 export function ReportsPage() {
@@ -1964,9 +1974,16 @@ export function ReportsPage() {
               aria-expanded={expandedModule === module.title}
               className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
             >
-              <div>
-                <h3 className="text-xl font-semibold text-brand-forest">{module.title}</h3>
-                <p className="mt-1 text-sm text-brand-forest/70">{module.description}</p>
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-cream/70 text-brand-forest">
+                  <span className="material-symbols-outlined text-[26px]" aria-hidden="true">
+                    {getModuleIcon(module.title)}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-brand-forest">{module.title}</h3>
+                  <p className="mt-1 text-sm text-brand-forest/70">{module.description}</p>
+                </div>
               </div>
               <span className="text-2xl font-semibold text-brand-forest">{expandedModule === module.title ? '-' : '+'}</span>
             </button>
