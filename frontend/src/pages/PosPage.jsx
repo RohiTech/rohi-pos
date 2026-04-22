@@ -1429,9 +1429,6 @@ export function PosPage() {
     return () => window.removeEventListener('keydown', handleKeydown);
   }, [activeView, ticketTotal, keypadTarget, selectedLineIndex, saleForm.items]);
 
-  const isCajaView = activeView === 'cash-movements' || activeView === 'cash-close';
-  const isInventoryView = activeView === 'products' || activeView === 'inventory';
-
   return (
     <div>
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
@@ -1458,16 +1455,36 @@ export function PosPage() {
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            isCajaView ? 'bg-brand-moss text-white' : 'border border-brand-sand text-brand-forest'
+            activeView === 'cash-movements'
+              ? 'bg-brand-moss text-white'
+              : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => setActiveView('cash-movements')}
+          type="button"
+        >
+          Movimientos de caja
+        </button>
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'cash-close' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'
           }`}
           onClick={() => setActiveView('cash-close')}
           type="button"
         >
-          Caja
+          Cierre de caja
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            isInventoryView ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
+            activeView === 'products' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
+          }`}
+          onClick={() => setActiveView('products')}
+          type="button"
+        >
+          Productos
+        </button>
+        <button
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
+            activeView === 'inventory' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'
           }`}
           onClick={() => setActiveView('inventory')}
           type="button"
@@ -1475,60 +1492,6 @@ export function PosPage() {
           Inventario
         </button>
       </div>
-
-      {isCajaView ? (
-        <div className="mb-6 flex flex-wrap gap-2">
-          <button
-            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
-              activeView === 'cash-movements'
-                ? 'bg-brand-moss text-white'
-                : 'border border-brand-sand text-brand-forest'
-            }`}
-            onClick={() => setActiveView('cash-movements')}
-            type="button"
-          >
-            Movimientos de caja
-          </button>
-          <button
-            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
-              activeView === 'cash-close'
-                ? 'bg-brand-clay text-white'
-                : 'border border-brand-sand text-brand-forest'
-            }`}
-            onClick={() => setActiveView('cash-close')}
-            type="button"
-          >
-            Cierre de caja
-          </button>
-        </div>
-      ) : null}
-
-      {isInventoryView ? (
-        <div className="mb-6 flex flex-wrap gap-2">
-          <button
-            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
-              activeView === 'products'
-                ? 'bg-brand-forest text-white'
-                : 'border border-brand-sand text-brand-forest'
-            }`}
-            onClick={() => setActiveView('products')}
-            type="button"
-          >
-            Productos
-          </button>
-          <button
-            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
-              activeView === 'inventory'
-                ? 'bg-brand-clay text-white'
-                : 'border border-brand-sand text-brand-forest'
-            }`}
-            onClick={() => setActiveView('inventory')}
-            type="button"
-          >
-            Inventario
-          </button>
-        </div>
-      ) : null}
 
       {activeView === 'sales' ? (
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_24rem]">
