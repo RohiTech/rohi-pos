@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
@@ -52,6 +54,79 @@ function getAttendanceTone(status) {
   }
 
   return 'bg-slate-100 text-slate-700';
+}
+
+function getExportStamp() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0')
+  ].join('');
+}
+
+function exportRowsToExcel(sheetName, rows, fileName, widths = []) {
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+
+  if (widths.length) {
+    worksheet['!cols'] = widths.map((wch) => ({ wch }));
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  XLSX.writeFile(workbook, `${fileName}_${getExportStamp()}.xlsx`);
+}
+
+function exportRowsToPdf(title, columns, rows, fileName) {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'pt',
+    format: 'a4'
+  });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 32;
+  const rowHeight = 18;
+  const usableWidth = pageWidth - margin * 2;
+  const colWidth = usableWidth / columns.length;
+  let y = margin;
+
+  const drawHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(title, margin, y);
+    y += 24;
+    doc.setFontSize(9);
+    columns.forEach((column, index) => {
+      doc.text(column, margin + index * colWidth + 2, y);
+    });
+    y += 8;
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 14;
+  };
+
+  drawHeader();
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+
+  rows.forEach((row) => {
+    if (y > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+    }
+
+    row.forEach((value, index) => {
+      const text = doc.splitTextToSize(String(value ?? '--'), colWidth - 6)[0] || '--';
+      doc.text(text, margin + index * colWidth + 2, y);
+    });
+
+    y += rowHeight;
+  });
+
+  doc.save(`${fileName}_${getExportStamp()}.pdf`);
 }
 
 export function AttendancePage() {
@@ -502,6 +577,98 @@ export function AttendancePage() {
     );
   });
 
+  function handleExportClientsExcel() {
+    if (!clients.length) {
+      setError('No hay clientes para exportar.');
+      return;
+    }
+
+    setError('');
+    exportRowsToExcel(
+      'Clientes rutina',
+      clients.map((client) => ({
+        Codigo: client.client_code || '--',
+        Nombre: `${client.first_name || ''} ${client.last_name || ''}`.trim() || '--',
+        Telefono: client.phone || '--',
+        Plan: client.plan_name || 'Sin plan registrado',
+        Estado: client.is_active ? 'Activo' : 'Inactivo',
+        Membresia: client.membership_effective_status || 'Sin membresia',
+        Vence: formatDate(client.end_date)
+      })),
+      'clientes_pago_rutina',
+      [14, 26, 16, 24, 12, 18, 14]
+    );
+  }
+
+  function handleExportClientsPdf() {
+    if (!clients.length) {
+      setError('No hay clientes para exportar.');
+      return;
+    }
+
+    setError('');
+    exportRowsToPdf(
+      'Clientes encontrados - Pago Rutina',
+      ['Codigo', 'Nombre', 'Telefono', 'Plan', 'Estado', 'Membresia', 'Vence'],
+      clients.map((client) => [
+        client.client_code || '--',
+        `${client.first_name || ''} ${client.last_name || ''}`.trim() || '--',
+        client.phone || '--',
+        client.plan_name || 'Sin plan',
+        client.is_active ? 'Activo' : 'Inactivo',
+        client.membership_effective_status || 'Sin membresia',
+        formatDate(client.end_date)
+      ]),
+      'clientes_pago_rutina'
+    );
+  }
+
+  function handleExportDailyPaymentsExcel() {
+    if (!filteredDailyPayments.length) {
+      setError('No hay pagos para exportar.');
+      return;
+    }
+
+    setError('');
+    exportRowsToExcel(
+      'Pagos rutina',
+      filteredDailyPayments.map((payment) => ({
+        Codigo: payment.client_code || '--',
+        Cliente: `${payment.client_first_name || ''} ${payment.client_last_name || ''}`.trim() || '--',
+        Monto: Number(payment.amount || 0),
+        Metodo: payment.payment_method || '--',
+        Estado: payment.used_for_checkin_today ? 'Asistencia usada' : 'Pendiente de marcar',
+        Fecha: formatDate(payment.paid_at),
+        Notas: payment.notes || 'Sin notas'
+      })),
+      'pagos_rutina',
+      [14, 26, 12, 16, 20, 16, 36]
+    );
+  }
+
+  function handleExportDailyPaymentsPdf() {
+    if (!filteredDailyPayments.length) {
+      setError('No hay pagos para exportar.');
+      return;
+    }
+
+    setError('');
+    exportRowsToPdf(
+      'Pagos de rutina del dia',
+      ['Codigo', 'Cliente', 'Monto', 'Metodo', 'Estado', 'Fecha', 'Notas'],
+      filteredDailyPayments.map((payment) => [
+        payment.client_code || '--',
+        `${payment.client_first_name || ''} ${payment.client_last_name || ''}`.trim() || '--',
+        formatCurrency(payment.amount || 0),
+        payment.payment_method || '--',
+        payment.used_for_checkin_today ? 'Asistencia usada' : 'Pendiente',
+        formatDate(payment.paid_at),
+        payment.notes || 'Sin notas'
+      ]),
+      'pagos_rutina'
+    );
+  }
+
   return (
     <div>
       {message ? <p className="mb-4 text-sm text-emerald-700">{message}</p> : null}
@@ -541,6 +708,25 @@ export function AttendancePage() {
                 Buscar
               </button>
             </form>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={!clients.length}
+                onClick={handleExportClientsExcel}
+                type="button"
+              >
+                Exportar Excel
+              </button>
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={!clients.length}
+                onClick={handleExportClientsPdf}
+                type="button"
+              >
+                Exportar PDF
+              </button>
+            </div>
 
             {loading ? <p className="mt-4 text-sm text-brand-forest/70">Cargando clientes...</p> : null}
 
@@ -749,6 +935,25 @@ export function AttendancePage() {
               placeholder="Buscar por codigo, cliente, metodo o nota"
               value={dailyPaymentsSearch}
             />
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={!filteredDailyPayments.length}
+                onClick={handleExportDailyPaymentsExcel}
+                type="button"
+              >
+                Exportar Excel
+              </button>
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={!filteredDailyPayments.length}
+                onClick={handleExportDailyPaymentsPdf}
+                type="button"
+              >
+                Exportar PDF
+              </button>
+            </div>
 
             {!dailyPayments.length ? (
               <div className="mt-4">
