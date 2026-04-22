@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { Router } from 'express';
 import { query } from '../config/db.js';
+import { buildCashSessionSummary } from './cash-register.routes.js';
 
 const reportsRouter = Router();
 const DEFAULT_TIME_ZONE = 'America/Managua';
@@ -3305,31 +3306,8 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
       conditions.push(`cs.status = $${sqlParams.length}`);
     }
 
-    const result = await query(
+    const sessionResult = await query(
       `SELECT
-         cs.id,
-         cs.status,
-         cs.opened_at,
-         cs.closed_at,
-         cs.opening_amount,
-         cs.closing_amount,
-         cs.expected_amount,
-         cs.difference_amount,
-         COUNT(DISTINCT s.id)::int AS total_sales,
-         COALESCE(SUM(s.total), 0)::numeric(12,2) AS total_sales_amount,
-         COALESCE(SUM(CASE WHEN p.payment_method = 'cash' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_cash,
-         COALESCE(SUM(CASE WHEN p.payment_method = 'card' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_card,
-         COALESCE(SUM(CASE WHEN p.payment_method = 'transfer' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_transfer,
-         COALESCE(SUM(CASE WHEN p.payment_method = 'mobile' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_mobile,
-         COALESCE(SUM(CASE WHEN p.payment_method = 'other' THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_other
-       FROM cash_register_sessions cs
-       LEFT JOIN sales s
-         ON s.cash_register_session_id = cs.id
-        AND s.status = 'completed'
-       LEFT JOIN payments p
-         ON p.sale_id = s.id
-       WHERE ${conditions.join(' AND ')}
-       GROUP BY
          cs.id,
          cs.status,
          cs.opened_at,
@@ -3338,27 +3316,54 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
          cs.closing_amount,
          cs.expected_amount,
          cs.difference_amount
+       FROM cash_register_sessions cs
+       WHERE ${conditions.join(' AND ')}
        ORDER BY cs.opened_at DESC`,
       sqlParams
     );
 
-    const extraIncomeResult = await query(
-      `SELECT
-         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS membership_income,
-         COALESCE(SUM(CASE WHEN p.payment_number LIKE 'DAY-%' AND p.sale_id IS NULL AND p.membership_id IS NULL THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS daily_pass_income,
-         COALESCE(SUM(CASE WHEN p.membership_id IS NOT NULL OR (p.payment_number LIKE 'DAY-%' AND p.sale_id IS NULL AND p.membership_id IS NULL) THEN p.amount ELSE 0 END), 0)::numeric(12,2) AS total_extra_income
-       FROM payments p
-       WHERE p.paid_at::date BETWEEN $1 AND $2`,
-      [fechaInicio, fechaFin]
+    const sessionRows = sessionResult.rows;
+    const rows = await Promise.all(
+      sessionRows.map(async (sessionRow) => {
+        const summary = await buildCashSessionSummary(sessionRow.id);
+        const totalOperations =
+          Number(summary.metrics.pos_sales_count || 0) +
+          Number(summary.metrics.membership_sales_count || 0) +
+          Number(summary.metrics.daily_pass_sales_count || 0);
+
+        return {
+          id: summary.session.id,
+          status: summary.session.status,
+          opened_at: summary.session.opened_at,
+          closed_at: summary.session.closed_at,
+          opening_amount: Number(summary.session.opening_amount || 0),
+          closing_amount:
+            summary.session.closing_amount == null ? null : Number(summary.session.closing_amount),
+          expected_amount:
+            summary.session.status === 'closed' && summary.session.expected_amount != null
+              ? Number(summary.session.expected_amount)
+              : Number(summary.metrics.expected_closing_amount || 0),
+          difference_amount:
+            summary.session.status === 'closed' && summary.session.difference_amount != null
+              ? Number(summary.session.difference_amount)
+              : null,
+          total_sales: totalOperations,
+          total_sales_amount: Number(summary.metrics.total_sales_all_channels || 0),
+          total_cash: Number(summary.metrics.all_channels_income_by_payment_method?.cash || 0),
+          total_card: Number(summary.metrics.all_channels_income_by_payment_method?.card || 0),
+          total_transfer: Number(summary.metrics.all_channels_income_by_payment_method?.transfer || 0),
+          total_mobile: Number(summary.metrics.all_channels_income_by_payment_method?.mobile || 0),
+          total_other: Number(summary.metrics.all_channels_income_by_payment_method?.other || 0),
+          membership_income: Number(summary.metrics.membership_sales_amount || 0),
+          daily_pass_income: Number(summary.metrics.daily_pass_sales_amount || 0),
+          total_extra_income:
+            Number(summary.metrics.membership_sales_amount || 0) +
+            Number(summary.metrics.daily_pass_sales_amount || 0)
+        };
+      })
     );
 
-    const rows = result.rows;
     const usuario = req.user?.username || req.user?.email || 'Desconocido';
-    const extraIncome = extraIncomeResult.rows[0] || {
-      membership_income: 0,
-      daily_pass_income: 0,
-      total_extra_income: 0
-    };
 
     const totals = rows.reduce(
       (acc, row) => {
@@ -3369,6 +3374,9 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
         acc.totalTransfer += Number(row.total_transfer || 0);
         acc.totalMobile += Number(row.total_mobile || 0);
         acc.totalOther += Number(row.total_other || 0);
+        acc.membershipIncome += Number(row.membership_income || 0);
+        acc.dailyPassIncome += Number(row.daily_pass_income || 0);
+        acc.totalExtraIncome += Number(row.total_extra_income || 0);
         return acc;
       },
       {
@@ -3379,9 +3387,9 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
         totalTransfer: 0,
         totalMobile: 0,
         totalOther: 0,
-        membershipIncome: Number(extraIncome.membership_income || 0),
-        dailyPassIncome: Number(extraIncome.daily_pass_income || 0),
-        totalExtraIncome: Number(extraIncome.total_extra_income || 0)
+        membershipIncome: 0,
+        dailyPassIncome: 0,
+        totalExtraIncome: 0
       }
     );
 
@@ -3413,7 +3421,7 @@ reportsRouter.get('/cash-summary/pdf', async (req, res, next) => {
       `Pagos - Efectivo: C$${totals.totalCash.toFixed(2)} | Tarjeta: C$${totals.totalCard.toFixed(2)} | Transferencia: C$${totals.totalTransfer.toFixed(2)} | Movil: C$${totals.totalMobile.toFixed(2)} | Otros: C$${totals.totalOther.toFixed(2)}`
     );
     doc.text(
-      `Ingresos adicionales - Membresias: C$${totals.membershipIncome.toFixed(2)} | Rutina diaria: C$${totals.dailyPassIncome.toFixed(2)} | Total adicional: C$${totals.totalExtraIncome.toFixed(2)}`
+      `Ventas - Ventas POS: C$${(totals.totalSalesAmount - totals.membershipIncome - totals.dailyPassIncome).toFixed(2)} | Membresias: C$${totals.membershipIncome.toFixed(2)} | Rutina diaria: C$${totals.dailyPassIncome.toFixed(2)}`
     );
     doc.moveDown();
 
@@ -3529,8 +3537,26 @@ reportsRouter.get('/cash-flow/pdf', async (req, res, next) => {
        sessions AS (
          SELECT
            COUNT(*)::int AS sessions_count,
-           COALESCE(SUM(cs.opening_amount), 0)::numeric(12,2) AS opening_total,
-           COALESCE(SUM(COALESCE(cs.closing_amount, cs.expected_amount, cs.opening_amount)), 0)::numeric(12,2) AS closing_total
+           COALESCE(
+             (
+               SELECT first_session.opening_amount::numeric(12,2)
+               FROM cash_register_sessions first_session
+               WHERE first_session.opened_at::date BETWEEN $1::date AND $2::date
+               ORDER BY first_session.opened_at ASC, first_session.id ASC
+               LIMIT 1
+             ),
+             0
+           )::numeric(12,2) AS opening_total,
+           COALESCE(
+             (
+               SELECT COALESCE(last_session.closing_amount, last_session.expected_amount, last_session.opening_amount)::numeric(12,2)
+               FROM cash_register_sessions last_session
+               WHERE last_session.opened_at::date BETWEEN $1::date AND $2::date
+               ORDER BY last_session.opened_at DESC, last_session.id DESC
+               LIMIT 1
+             ),
+             0
+           )::numeric(12,2) AS closing_total
          FROM cash_register_sessions cs
          WHERE cs.opened_at::date BETWEEN $1::date AND $2::date
        )
@@ -3557,10 +3583,20 @@ reportsRouter.get('/cash-flow/pdf', async (req, res, next) => {
     const membershipAmount = Number(data.membership_amount || 0);
     const routineAmount = Number(data.routine_amount || 0);
     const expenseAmount = Number(data.expense_amount || 0);
-    const openingTotal = Number(data.opening_total || 0);
-    const closingTotal = Number(data.closing_total || 0);
     const totalEntries = productAmount + membershipAmount + routineAmount;
     const netCashFlow = totalEntries - expenseAmount;
+
+    const previousBalanceResult = await query(
+      `SELECT COALESCE(cs.closing_amount, cs.expected_amount, cs.opening_amount, 0)::numeric(12,2) AS previous_balance
+       FROM cash_register_sessions cs
+       WHERE cs.opened_at::date < $1::date
+       ORDER BY cs.opened_at DESC, cs.id DESC
+       LIMIT 1`,
+      [startDate]
+    );
+
+    const openingTotal = Number(previousBalanceResult.rows[0]?.previous_balance || 0);
+    const closingTotal = openingTotal + netCashFlow;
 
     const usuario = req.user?.username || req.user?.email || 'Desconocido';
     const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
@@ -3626,13 +3662,37 @@ reportsRouter.get('/income-by-payment-method/pdf', async (req, res, next) => {
     }
 
     const { rows } = await query(
-      `SELECT
-         p.payment_method,
+      `WITH payments_source AS (
+         SELECT
+           p.payment_method,
+           COALESCE(p.amount, 0)::numeric(12,2) AS amount
+         FROM payments p
+         WHERE p.paid_at::date BETWEEN $1::date AND $2::date
+       ),
+       memberships_without_payment AS (
+         SELECT
+           'cash'::text AS payment_method,
+           COALESCE(m.amount_paid, 0)::numeric(12,2) AS amount
+         FROM memberships m
+         WHERE m.amount_paid > 0
+           AND m.created_at::date BETWEEN $1::date AND $2::date
+           AND NOT EXISTS (
+             SELECT 1
+             FROM payments p2
+             WHERE p2.membership_id = m.id
+           )
+       ),
+       all_income_rows AS (
+         SELECT * FROM payments_source
+         UNION ALL
+         SELECT * FROM memberships_without_payment
+       )
+       SELECT
+         payment_method,
          COUNT(*)::int AS operations,
-         COALESCE(SUM(p.amount), 0)::numeric(12,2) AS amount
-       FROM payments p
-       WHERE p.paid_at::date BETWEEN $1::date AND $2::date
-       GROUP BY p.payment_method
+         COALESCE(SUM(amount), 0)::numeric(12,2) AS amount
+       FROM all_income_rows
+       GROUP BY payment_method
        ORDER BY amount DESC`,
       [startDate, endDate]
     );

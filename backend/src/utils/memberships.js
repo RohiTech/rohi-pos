@@ -1,6 +1,7 @@
 import { createHttpError } from './http.js';
 
 const ALLOWED_STATUSES = new Set(['pending', 'active', 'expired', 'cancelled']);
+const ALLOWED_PAYMENT_METHODS = new Set(['cash', 'card', 'transfer', 'mobile', 'other']);
 
 function normalizeNullableString(value) {
   if (value === undefined || value === null) {
@@ -77,6 +78,23 @@ function normalizeStatus(value, defaultValue = 'pending') {
   return normalized;
 }
 
+function normalizePaymentMethod(value, required = false) {
+  if (value === undefined || value === null || value === '') {
+    if (required) {
+      throw createHttpError(400, 'payment_method is required');
+    }
+
+    return null;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!ALLOWED_PAYMENT_METHODS.has(normalized)) {
+    throw createHttpError(400, 'payment_method is invalid');
+  }
+
+  return normalized;
+}
+
 export function inferMembershipStatus(startDate, endDate) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -140,6 +158,7 @@ export function validateCreateMembershipPayload(payload) {
     price: normalizedPrice,
     discount,
     amount_paid: amountPaid,
+    payment_method: normalizePaymentMethod(payload.payment_method, false),
     notes: normalizeNullableString(payload.notes)
   };
 }

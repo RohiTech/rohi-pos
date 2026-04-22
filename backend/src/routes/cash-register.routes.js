@@ -203,6 +203,20 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
          AND p.paid_at >= $2
          AND p.paid_at <= COALESCE($3, NOW())
      ),
+     memberships_without_payment AS (
+       SELECT
+         'cash'::text AS payment_method,
+         COALESCE(m.amount_paid, 0)::numeric(12,2) AS amount
+       FROM memberships m
+       WHERE m.amount_paid > 0
+         AND m.created_at >= $2
+         AND m.created_at <= COALESCE($3, NOW())
+         AND NOT EXISTS (
+           SELECT 1
+           FROM payments p2
+           WHERE p2.membership_id = m.id
+         )
+     ),
      daily_pass_payments AS (
        SELECT
          p.payment_method,
@@ -218,6 +232,8 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
        SELECT * FROM pos_payments
        UNION ALL
        SELECT * FROM membership_payments
+       UNION ALL
+       SELECT * FROM memberships_without_payment
        UNION ALL
        SELECT * FROM daily_pass_payments
      )
@@ -285,8 +301,7 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
   const posSalesAmount = totalSalesAmount;
   const posSalesCount = totalReceiptsIssued;
   const totalSalesAllChannels = posSalesAmount + membershipIncome + dailyPassIncome;
-  const expectedClosingAmount =
-    Number(session.opening_amount || 0) + allChannelsByMethod.cash + cashIncome - cashExpense;
+  const expectedClosingAmount = allChannelsByMethod.cash + cashIncome - cashExpense;
 
   return {
     session: {
@@ -500,4 +515,4 @@ cashRegisterRouter.post('/current/close', async (request, response, next) => {
   }
 });
 
-export { cashRegisterRouter, getOrCreateOpenCashSession };
+export { cashRegisterRouter, getOrCreateOpenCashSession, buildCashSessionSummary };

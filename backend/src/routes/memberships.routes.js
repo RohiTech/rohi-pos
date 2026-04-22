@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import PDFDocument from 'pdfkit';
-import { query } from '../config/db.js';
+import { query, withTransaction } from '../config/db.js';
 import {
   addDaysToDate,
   inferMembershipStatus,
@@ -216,7 +216,12 @@ membershipsRouter.post('/', async (request, response, next) => {
 
     await ensureClientExists(payload.client_id);
     const plan = await getPlanById(payload.plan_id);
-    await ensureUserExists(payload.sold_by_user_id);
+    const requestUserId = Number(request.user?.id);
+    const soldByUserId =
+      payload.sold_by_user_id ||
+      (Number.isInteger(requestUserId) && requestUserId > 0 ? requestUserId : null);
+
+    await ensureUserExists(soldByUserId);
 
     const membershipNumber =
       payload.membership_number ||
@@ -233,38 +238,74 @@ membershipsRouter.post('/', async (request, response, next) => {
 
     const status = payload.status || inferMembershipStatus(payload.start_date, endDate);
 
-    const result = await query(
-      `INSERT INTO memberships (
-         client_id,
-         plan_id,
-         sold_by_user_id,
-         membership_number,
-         start_date,
-         end_date,
-         status,
-         price,
-         discount,
-         amount_paid,
-         notes
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id`,
-      [
-        payload.client_id,
-        payload.plan_id,
-        payload.sold_by_user_id,
-        membershipNumber,
-        payload.start_date,
-        endDate,
-        status,
-        price,
-        discount,
-        amountPaid,
-        payload.notes
-      ]
-    );
+    const paymentMethod = payload.payment_method || 'cash';
 
-    const membership = await getMembershipById(result.rows[0].id);
+    const membershipId = await withTransaction(async (dbClient) => {
+      const membershipInsertResult = await dbClient.query(
+        `INSERT INTO memberships (
+           client_id,
+           plan_id,
+           sold_by_user_id,
+           membership_number,
+           start_date,
+           end_date,
+           status,
+           price,
+           discount,
+           amount_paid,
+           notes
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id`,
+        [
+          payload.client_id,
+          payload.plan_id,
+          soldByUserId,
+          membershipNumber,
+          payload.start_date,
+          endDate,
+          status,
+          price,
+          discount,
+          amountPaid,
+          payload.notes
+        ]
+      );
+
+      const createdMembershipId = membershipInsertResult.rows[0].id;
+
+      if (amountPaid > 0) {
+        const paymentNumber = `PAY-MEM-${Date.now().toString().slice(-8)}-${Math.floor(
+          1000 + Math.random() * 9000
+        )}`;
+
+        await dbClient.query(
+          `INSERT INTO payments (
+             payment_number,
+             client_id,
+             membership_id,
+             received_by_user_id,
+             payment_method,
+             amount,
+             notes
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            paymentNumber,
+            payload.client_id,
+            createdMembershipId,
+            soldByUserId,
+            paymentMethod,
+            amountPaid,
+            payload.notes
+          ]
+        );
+      }
+
+      return createdMembershipId;
+    });
+
+    const membership = await getMembershipById(membershipId);
 
     response.status(201).json({
       ok: true,

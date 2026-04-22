@@ -30,6 +30,7 @@ const initialMembershipForm = {
   end_date: '',
   discount: '',
   amount_paid: '',
+  payment_method: 'cash',
   notes: ''
 };
 
@@ -459,6 +460,7 @@ export function MembershipsPage() {
       end_date: membership.end_date ? String(membership.end_date).slice(0, 10) : '',
       discount: String(membership.discount || ''),
       amount_paid: String(membership.amount_paid || ''),
+      payment_method: 'cash',
       notes: membership.notes || ''
     });
     setActiveView('membership-form');
@@ -550,6 +552,7 @@ export function MembershipsPage() {
           end_date: membershipForm.end_date || null,
           discount: membershipForm.discount === '' ? 0 : Number(membershipForm.discount),
           amount_paid: membershipForm.amount_paid === '' ? 0 : Number(membershipForm.amount_paid),
+          payment_method: membershipForm.payment_method || 'cash',
           notes: membershipForm.notes || null
         });
 
@@ -888,10 +891,26 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="discount" onChange={handleMembershipChange} step="0.01" type="number" value={membershipForm.discount} />
               </label>
             </div>
-            <div className="grid gap-4 md:grid-cols-1">
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2">
                 <span className="text-sm font-semibold text-brand-forest">Monto pagado</span>
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="amount_paid" onChange={handleMembershipChange} step="0.01" type="number" value={membershipForm.amount_paid} />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Metodo de pago</span>
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  disabled={Boolean(editingMembershipId)}
+                  name="payment_method"
+                  onChange={handleMembershipChange}
+                  value={membershipForm.payment_method}
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="card">Tarjeta</option>
+                  <option value="transfer">Transferencia</option>
+                  <option value="mobile">Pago movil</option>
+                  <option value="other">Otro</option>
+                </select>
               </label>
             </div>
             <label className="grid gap-2">
