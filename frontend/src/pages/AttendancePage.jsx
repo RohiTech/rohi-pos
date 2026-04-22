@@ -5,7 +5,7 @@ import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { apiGet, apiPost, buildQueryString } from '../lib/api';
+import { apiGet, apiPost, authToken, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const initialForm = {
@@ -16,6 +16,7 @@ const initialForm = {
 };
 
 const SCAN_COOLDOWN_MS = 3000;
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 function parseQrPayload(rawValue) {
   const rawText = String(rawValue || '').trim();
@@ -70,6 +71,8 @@ export function AttendancePage() {
   });
   const [summary, setSummary] = useState(null);
   const [dailyPayments, setDailyPayments] = useState([]);
+  const [dailyPaymentsSearch, setDailyPaymentsSearch] = useState('');
+  const [reprintingPaymentId, setReprintingPaymentId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
@@ -106,6 +109,46 @@ export function AttendancePage() {
   useEffect(() => {
     clientPageRef.current = clientPage;
   }, [clientPage]);
+
+  async function openDailyPassReceipt(paymentId) {
+    if (!paymentId) {
+      return;
+    }
+
+    const response = await fetch(`${API_URL}/attendance/daily-pass-payments/${paymentId}/receipt/pdf`, {
+      headers: authToken
+        ? {
+            Authorization: `Bearer ${authToken}`
+          }
+        : {}
+    });
+
+    if (!response.ok) {
+      throw new Error('No se pudo abrir el recibo del pago diario.');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+  }
+
+  async function handleReprintReceipt(paymentId) {
+    if (!paymentId) {
+      return;
+    }
+
+    setError('');
+
+    try {
+      setReprintingPaymentId(paymentId);
+      await openDailyPassReceipt(paymentId);
+    } catch (requestError) {
+      setError(requestError.message || 'No se pudo reimprimir el recibo.');
+    } finally {
+      setReprintingPaymentId(null);
+    }
+  }
 
   async function stopScanner() {
     const scanner = scannerRef.current;
@@ -405,13 +448,15 @@ export function AttendancePage() {
         throw new Error('No se detecto la sesion del usuario. Recarga la pagina e intenta de nuevo.');
       }
 
-      await apiPost('/attendance/daily-pass-payments', {
+      const paymentResponse = await apiPost('/attendance/daily-pass-payments', {
         client_id: Number(selectedClient.id),
         received_by_user_id: checkedInByUserId,
         payment_method: form.payment_method,
         daily_pass_amount: Number(form.daily_pass_amount || 0),
         notes: form.notes || null
       });
+
+      await openDailyPassReceipt(paymentResponse?.data?.payment?.id);
 
       setMessage('Pago diario registrado correctamente. El cliente ya puede marcar asistencia hoy.');
       setForm(initialForm);
@@ -437,6 +482,25 @@ export function AttendancePage() {
     setPhotoViewerSrc('');
     setPhotoViewerAlt('Foto de cliente');
   }
+
+  const normalizedDailyPaymentsSearch = dailyPaymentsSearch.trim().toLowerCase();
+  const filteredDailyPayments = dailyPayments.filter((payment) => {
+    if (!normalizedDailyPaymentsSearch) {
+      return true;
+    }
+
+    const fullName = `${payment.client_first_name || ''} ${payment.client_last_name || ''}`.trim().toLowerCase();
+    const clientCode = String(payment.client_code || '').toLowerCase();
+    const paymentMethod = String(payment.payment_method || '').toLowerCase();
+    const notes = String(payment.notes || '').toLowerCase();
+
+    return (
+      fullName.includes(normalizedDailyPaymentsSearch) ||
+      clientCode.includes(normalizedDailyPaymentsSearch) ||
+      paymentMethod.includes(normalizedDailyPaymentsSearch) ||
+      notes.includes(normalizedDailyPaymentsSearch)
+    );
+  });
 
   return (
     <div>
@@ -559,13 +623,144 @@ export function AttendancePage() {
             ) : null}
             <Pagination currentPage={clientPagination.page} itemLabel="clientes" onPageChange={setClientPage} pageSize={clientPagination.limit} totalItems={clientPagination.totalItems} totalPages={clientPagination.totalPages} />
           </DataPanel>
+        </div>
+
+        <div className="grid content-start gap-6">
+          <DataPanel
+            title="Registrar pago de rutina"
+            subtitle="Solo clientes sin membresia activa. El pago habilita asistencia durante hoy."
+          >
+            {selectedClient ? (
+              <div className="mb-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
+                <div className="flex items-start gap-3">
+                  {selectedClient.photo_url ? (
+                    <img
+                      alt={`${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Cliente'}
+                      className="h-14 w-14 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                      onClick={() =>
+                        openPhotoViewer(
+                          selectedClient.photo_url,
+                          `${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Foto de cliente'
+                        )
+                      }
+                      src={selectedClient.photo_url}
+                    />
+                  ) : (
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-sm font-semibold uppercase text-brand-forest">
+                      {`${selectedClient.first_name?.[0] || ''}${selectedClient.last_name?.[0] || ''}` || '--'}
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
+                      {selectedClient.client_code}
+                    </p>
+                    <h3 className="mt-1 font-semibold text-brand-forest">
+                      {selectedClient.first_name} {selectedClient.last_name}
+                    </h3>
+                  </div>
+                </div>
+                <p className="mt-2 text-sm text-brand-forest/70">
+                  Plan actual: {selectedClient.plan_name || 'Sin membresia activa'}
+                </p>
+                <p className="mt-1 text-sm text-brand-forest/70">
+                  Vence: {formatDate(selectedClient.end_date)}
+                </p>
+                {!selectedClient.is_active ? (
+                  <p className="mt-3 rounded-2xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-700">
+                    El cliente esta inactivo. No se puede registrar asistencia.
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <EmptyState title="Sin cliente seleccionado" description="Selecciona un cliente sin membresia activa desde la lista." />
+            )}
+
+            <form className="mt-4 grid gap-4" onSubmit={handleSubmit}>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  min="0.01"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      daily_pass_amount: event.target.value
+                    }))
+                  }
+                  step="0.01"
+                  type="number"
+                  value={form.daily_pass_amount}
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Metodo de pago</span>
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      payment_method: event.target.value
+                    }))
+                  }
+                  value={form.payment_method}
+                >
+                  <option value="cash">Efectivo</option>
+                  <option value="card">Tarjeta</option>
+                  <option value="transfer">Transferencia</option>
+                  <option value="mobile">Pago movil</option>
+                  <option value="other">Otro</option>
+                </select>
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Notas</span>
+                <textarea
+                  className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                      client_id: selectedClient ? String(selectedClient.id) : current.client_id
+                    }))
+                  }
+                  value={form.notes}
+                />
+              </label>
+
+              <button
+                className="rounded-2xl bg-brand-clay px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                disabled={
+                  saving ||
+                  !selectedClient ||
+                  !selectedClient.is_active
+                }
+                type="submit"
+              >
+                {saving ? 'Procesando...' : 'Registrar pago diario'}
+              </button>
+            </form>
+          </DataPanel>
 
           <DataPanel title="Pagos de rutina del dia" subtitle="Clientes que ya pagaron su rutina hoy.">
+            <input
+              className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+              onChange={(event) => setDailyPaymentsSearch(event.target.value)}
+              placeholder="Buscar por codigo, cliente, metodo o nota"
+              value={dailyPaymentsSearch}
+            />
+
             {!dailyPayments.length ? (
-              <EmptyState title="Sin pagos" description="Todavia no hay pagos diarios registrados hoy." />
+              <div className="mt-4">
+                <EmptyState title="Sin pagos" description="Todavia no hay pagos diarios registrados hoy." />
+              </div>
+            ) : !filteredDailyPayments.length ? (
+              <div className="mt-4">
+                <EmptyState title="Sin coincidencias" description="No hay pagos que coincidan con tu busqueda." />
+              </div>
             ) : (
-              <div className="space-y-3">
-                {dailyPayments.map((payment) => (
+              <div className="mt-4 space-y-3">
+                {filteredDailyPayments.map((payment) => (
                   <article key={payment.id} className="rounded-2xl border border-brand-sand/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -579,15 +774,25 @@ export function AttendancePage() {
                           Pago diario · {formatCurrency(payment.amount || 0)} · Metodo: {payment.payment_method}
                         </p>
                       </div>
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
-                          payment.used_for_checkin_today
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        {payment.used_for_checkin_today ? 'Asistencia usada' : 'Pendiente de marcar'}
-                      </span>
+                      <div className="flex flex-col items-end gap-2">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${
+                            payment.used_for_checkin_today
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {payment.used_for_checkin_today ? 'Asistencia usada' : 'Pendiente de marcar'}
+                        </span>
+                        <button
+                          className="rounded-full bg-brand-forest px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-60"
+                          disabled={reprintingPaymentId === payment.id}
+                          onClick={() => handleReprintReceipt(payment.id)}
+                          type="button"
+                        >
+                          {reprintingPaymentId === payment.id ? 'Imprimiendo...' : 'Reimprimir recibo'}
+                        </button>
+                      </div>
                     </div>
                     <p className="mt-3 text-sm text-brand-forest/70">
                       Fecha pago: {formatDate(payment.paid_at)} · {payment.notes || 'Sin notas'}
@@ -598,122 +803,6 @@ export function AttendancePage() {
             )}
           </DataPanel>
         </div>
-
-        <DataPanel
-          title="Registrar pago de rutina"
-          subtitle="Solo clientes sin membresia activa. El pago habilita asistencia durante hoy."
-        >
-          {selectedClient ? (
-            <div className="mb-4 rounded-2xl border border-brand-sand/70 bg-brand-cream/40 p-4">
-              <div className="flex items-start gap-3">
-                {selectedClient.photo_url ? (
-                  <img
-                    alt={`${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Cliente'}
-                    className="h-14 w-14 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
-                    onClick={() =>
-                      openPhotoViewer(
-                        selectedClient.photo_url,
-                        `${selectedClient.first_name || ''} ${selectedClient.last_name || ''}`.trim() || 'Foto de cliente'
-                      )
-                    }
-                    src={selectedClient.photo_url}
-                  />
-                ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-sm font-semibold uppercase text-brand-forest">
-                    {`${selectedClient.first_name?.[0] || ''}${selectedClient.last_name?.[0] || ''}` || '--'}
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">
-                    {selectedClient.client_code}
-                  </p>
-                  <h3 className="mt-1 font-semibold text-brand-forest">
-                    {selectedClient.first_name} {selectedClient.last_name}
-                  </h3>
-                </div>
-              </div>
-              <p className="mt-2 text-sm text-brand-forest/70">
-                Plan actual: {selectedClient.plan_name || 'Sin membresia activa'}
-              </p>
-              <p className="mt-1 text-sm text-brand-forest/70">
-                Vence: {formatDate(selectedClient.end_date)}
-              </p>
-              {!selectedClient.is_active ? (
-                <p className="mt-3 rounded-2xl bg-rose-100 px-3 py-2 text-sm font-semibold text-rose-700">
-                  El cliente esta inactivo. No se puede registrar asistencia.
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            <EmptyState title="Sin cliente seleccionado" description="Selecciona un cliente sin membresia activa desde la lista." />
-          )}
-
-          <form className="mt-4 grid gap-4" onSubmit={handleSubmit}>
-            <label className="grid gap-2">
-              <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
-              <input
-                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                min="0.01"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    daily_pass_amount: event.target.value
-                  }))
-                }
-                step="0.01"
-                type="number"
-                value={form.daily_pass_amount}
-              />
-            </label>
-
-            <label className="grid gap-2">
-              <span className="text-sm font-semibold text-brand-forest">Metodo de pago</span>
-              <select
-                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    payment_method: event.target.value
-                  }))
-                }
-                value={form.payment_method}
-              >
-                <option value="cash">Efectivo</option>
-                <option value="card">Tarjeta</option>
-                <option value="transfer">Transferencia</option>
-                <option value="mobile">Pago movil</option>
-                <option value="other">Otro</option>
-              </select>
-            </label>
-
-            <label className="grid gap-2">
-              <span className="text-sm font-semibold text-brand-forest">Notas</span>
-              <textarea
-                className="min-h-24 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    notes: event.target.value,
-                    client_id: selectedClient ? String(selectedClient.id) : current.client_id
-                  }))
-                }
-                value={form.notes}
-              />
-            </label>
-
-            <button
-              className="rounded-2xl bg-brand-clay px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
-              disabled={
-                saving ||
-                !selectedClient ||
-                !selectedClient.is_active
-              }
-              type="submit"
-            >
-              {saving ? 'Procesando...' : 'Registrar pago diario'}
-            </button>
-          </form>
-        </DataPanel>
       </section>
 
       {photoViewerSrc ? (

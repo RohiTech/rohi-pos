@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import PDFDocument from 'pdfkit';
 import { query, withTransaction } from '../config/db.js';
 import {
   createHttpError,
@@ -837,6 +838,124 @@ attendanceRouter.post('/daily-pass-payments', async (request, response, next) =>
       message: 'Pago diario registrado correctamente',
       data: result
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+attendanceRouter.get('/daily-pass-payments/:id/receipt/pdf', async (request, response, next) => {
+  try {
+    const paymentId = parsePositiveInteger(request.params.id);
+
+    if (!paymentId) {
+      throw createHttpError(400, 'payment id must be a positive integer');
+    }
+
+    const paymentResult = await query(
+      `SELECT
+         p.id,
+         p.payment_number,
+         p.amount,
+         p.payment_method,
+         p.currency_code,
+         p.notes,
+         p.paid_at,
+         c.client_code,
+         c.first_name AS client_first_name,
+         c.last_name AS client_last_name,
+         u.username AS cashier_username
+       FROM payments p
+       INNER JOIN clients c ON c.id = p.client_id
+       LEFT JOIN users u ON u.id = p.received_by_user_id
+       WHERE p.id = $1
+         AND p.payment_number LIKE 'DAY-%'
+         AND p.sale_id IS NULL
+         AND p.membership_id IS NULL
+       LIMIT 1`,
+      [paymentId]
+    );
+
+    if (paymentResult.rowCount === 0) {
+      throw createHttpError(404, 'Daily pass payment not found');
+    }
+
+    const payment = paymentResult.rows[0];
+
+    const settingsResult = await query(
+      `SELECT setting_key, setting_value
+       FROM system_settings
+       WHERE setting_key = ANY($1)
+       ORDER BY setting_key ASC`,
+      [['company_name']]
+    );
+
+    const settings = Object.fromEntries(settingsResult.rows.map((row) => [row.setting_key, row.setting_value]));
+    const companyName = String(settings.company_name || '').trim() || 'RohiPOS';
+    const paymentMethodLabel = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      mobile: 'Pago movil',
+      other: 'Otro'
+    };
+
+    const doc = new PDFDocument({ margin: 34, size: [226.77, 420] });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `inline; filename="recibo_rutina_${payment.payment_number || payment.id}.pdf"`
+    );
+    doc.pipe(response);
+
+    doc.font('Helvetica-Bold').fontSize(13).text(companyName, { align: 'center' });
+    doc.font('Helvetica').fontSize(9).text('Recibo de pago diario de rutina', { align: 'center' });
+    doc.moveDown(0.7);
+
+    doc.fontSize(8);
+    doc.text(`Recibo: ${payment.payment_number || payment.id}`);
+    doc.text(`Fecha: ${new Date(payment.paid_at).toLocaleString('es-NI')}`);
+    doc.text(`Cajero: ${payment.cashier_username || '--'}`);
+    doc.text(`Cliente: ${payment.client_code} - ${payment.client_first_name} ${payment.client_last_name}`);
+    doc.moveDown(0.5);
+
+    doc.moveTo(34, doc.y).lineTo(192, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(0.6);
+
+    doc.font('Helvetica').fontSize(9);
+    doc.text('Concepto', 34, doc.y, { width: 120, align: 'left', lineBreak: false });
+    doc.text('Monto', 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.4);
+
+    doc.font('Helvetica').fontSize(8.5);
+    doc.text('Pago de rutina diaria', 34, doc.y, { width: 120, align: 'left', lineBreak: false });
+    doc.text(`C$${Number(payment.amount || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+    doc.moveDown(0.45);
+    doc.text('Metodo de pago', 34, doc.y, { width: 120, align: 'left', lineBreak: false });
+    doc.text(paymentMethodLabel[payment.payment_method] || payment.payment_method, 154, doc.y, {
+      width: 38,
+      align: 'right'
+    });
+
+    if (payment.notes) {
+      doc.moveDown(0.6);
+      doc.text(`Notas: ${payment.notes}`, 34, doc.y, { width: 158, align: 'left' });
+    }
+
+    doc.moveDown(0.9);
+    doc.moveTo(34, doc.y).lineTo(192, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(0.6);
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', 34, doc.y, { width: 120, align: 'left', lineBreak: false });
+    doc.text(`C$${Number(payment.amount || 0).toFixed(2)}`, 154, doc.y, { width: 38, align: 'right' });
+
+    doc.moveDown(1);
+    doc.font('Helvetica').fontSize(8).text('Gracias por su pago', 34, doc.y, {
+      width: 158,
+      align: 'center'
+    });
+
+    doc.end();
   } catch (error) {
     next(error);
   }
