@@ -385,9 +385,17 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
        memberships_income AS (
          SELECT
            p.payment_number AS operation_number,
-           p.amount AS subtotal,
-           0::numeric(12,2) AS tax,
-           p.amount AS total,
+           CASE
+             WHEN COALESCE(mp.tax_rate, 0) > 0
+               THEN COALESCE(p.amount, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)
+             ELSE COALESCE(p.amount, 0)
+           END::numeric(12,2) AS subtotal,
+           CASE
+             WHEN COALESCE(mp.tax_rate, 0) > 0
+               THEN GREATEST(COALESCE(p.amount, 0) - (COALESCE(p.amount, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)), 0)
+             ELSE 0::numeric
+           END::numeric(12,2) AS tax,
+           COALESCE(p.amount, 0)::numeric(12,2) AS total,
            p.paid_at AS operation_at,
            p.received_by_user_id AS cashier_user_id,
            u.username AS cashier_username,
@@ -395,6 +403,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            NULL::bigint AS cash_register_session_id,
            'membership'::text AS source_type
          FROM payments p
+         LEFT JOIN memberships m ON m.id = p.membership_id
+         LEFT JOIN membership_plans mp ON mp.id = m.plan_id
          LEFT JOIN users u ON u.id = p.received_by_user_id
          WHERE $3::boolean = TRUE
            AND p.membership_id IS NOT NULL
@@ -405,9 +415,17 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
 
          SELECT
            m.membership_number AS operation_number,
-           m.amount_paid AS subtotal,
-           0::numeric(12,2) AS tax,
-           m.amount_paid AS total,
+           CASE
+             WHEN COALESCE(mp.tax_rate, 0) > 0
+               THEN COALESCE(m.amount_paid, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)
+             ELSE COALESCE(m.amount_paid, 0)
+           END::numeric(12,2) AS subtotal,
+           CASE
+             WHEN COALESCE(mp.tax_rate, 0) > 0
+               THEN GREATEST(COALESCE(m.amount_paid, 0) - (COALESCE(m.amount_paid, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)), 0)
+             ELSE 0::numeric
+           END::numeric(12,2) AS tax,
+           COALESCE(m.amount_paid, 0)::numeric(12,2) AS total,
            m.created_at AS operation_at,
            m.sold_by_user_id AS cashier_user_id,
            u.username AS cashier_username,
@@ -415,6 +433,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            NULL::bigint AS cash_register_session_id,
            'membership'::text AS source_type
          FROM memberships m
+         LEFT JOIN membership_plans mp ON mp.id = m.plan_id
          LEFT JOIN users u ON u.id = m.sold_by_user_id
          WHERE $3::boolean = TRUE
            AND m.amount_paid > 0
