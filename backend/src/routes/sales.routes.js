@@ -265,14 +265,59 @@ salesRouter.get('/', async (request, response, next) => {
 salesRouter.get('/summary', async (_request, response, next) => {
   try {
     const result = await query(
-      `WITH sales_totals AS (
+      `WITH sales_base_per_sale AS (
+         SELECT
+           s.id,
+           s.sold_at::date AS sold_date,
+           COALESCE(s.discount, 0)::numeric(14,4) AS global_discount,
+           COALESCE(
+             SUM(
+               CASE
+                 WHEN si.item_type = 'product' AND COALESCE(p.tax_rate, 0) > 0
+                   THEN si.line_total / (1 + COALESCE(p.tax_rate, 0) / 100.0)
+                 ELSE si.line_total
+               END
+             ),
+             0
+           )::numeric(14,4) AS base_lines_total,
+           COALESCE(SUM(si.line_total), 0)::numeric(14,4) AS gross_lines_total
+         FROM sales s
+         LEFT JOIN sale_items si ON si.sale_id = s.id
+         LEFT JOIN products p ON p.id = si.product_id
+         WHERE s.status = 'completed'
+         GROUP BY s.id, s.sold_at::date, s.discount
+       ),
+       sales_totals AS (
          SELECT
            COUNT(*)::int AS total_sales,
-           COALESCE(SUM(total), 0)::numeric(12,2) AS total_revenue,
-           COALESCE(SUM(total) FILTER (WHERE sold_at::date = CURRENT_DATE), 0)::numeric(12,2) AS revenue_today,
-           COUNT(*) FILTER (WHERE sold_at::date = CURRENT_DATE)::int AS sales_today
-         FROM sales
-         WHERE status = 'completed'
+           COALESCE(
+             SUM(
+               GREATEST(
+                 CASE
+                   WHEN sb.gross_lines_total > 0
+                     THEN sb.base_lines_total - (sb.global_discount * (sb.base_lines_total / sb.gross_lines_total))
+                   ELSE sb.base_lines_total
+                 END,
+                 0
+               )
+             ),
+             0
+           )::numeric(12,2) AS total_revenue,
+           COALESCE(
+             SUM(
+               GREATEST(
+                 CASE
+                   WHEN sb.gross_lines_total > 0
+                     THEN sb.base_lines_total - (sb.global_discount * (sb.base_lines_total / sb.gross_lines_total))
+                   ELSE sb.base_lines_total
+                 END,
+                 0
+               )
+             ) FILTER (WHERE sb.sold_date = CURRENT_DATE),
+             0
+           )::numeric(12,2) AS revenue_today,
+           COUNT(*) FILTER (WHERE sb.sold_date = CURRENT_DATE)::int AS sales_today
+         FROM sales_base_per_sale sb
        ),
        daily_pass_income AS (
          SELECT
