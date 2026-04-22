@@ -260,7 +260,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       fechaFin,
       cashier_user_id: cashierUserIdRaw,
       status: saleStatusRaw,
-      cash_register_session_id: cashSessionIdRaw
+      cash_register_session_id: cashSessionIdRaw,
+      source_type: sourceTypeRaw
     } = req.query;
 
     const systemTimeZone = await getSystemTimeZone();
@@ -276,6 +277,12 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     const saleStatus = String(saleStatusRaw || '').trim();
     if (saleStatus && !allowedStatuses.has(saleStatus)) {
       return res.status(400).json({ message: 'status debe ser pending, completed o cancelled' });
+    }
+
+    const allowedSourceTypes = new Set(['all', 'pos', 'membership', 'daily_pass']);
+    const sourceType = String(sourceTypeRaw || 'all').trim() || 'all';
+    if (!allowedSourceTypes.has(sourceType)) {
+      return res.status(400).json({ message: 'source_type debe ser all, pos, membership o daily_pass' });
     }
 
     const cashierUserId = cashierUserIdRaw
@@ -446,12 +453,17 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            AND p.membership_id IS NULL
            AND (p.paid_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($4::bigint IS NULL OR p.received_by_user_id = $4::bigint)
+       ),
+       all_operations AS (
+         SELECT * FROM pos_sales
+         UNION ALL
+         SELECT * FROM memberships_income
+         UNION ALL
+         SELECT * FROM daily_pass_income
        )
-       SELECT * FROM pos_sales
-       UNION ALL
-       SELECT * FROM memberships_income
-       UNION ALL
-       SELECT * FROM daily_pass_income
+       SELECT *
+       FROM all_operations
+       WHERE ($8::text = 'all' OR all_operations.source_type = $8::text)
        ORDER BY operation_at DESC`,
       [
         startDate,
@@ -460,7 +472,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
         cashierUserId,
         saleStatus || null,
         cashSessionId,
-        systemTimeZone
+        systemTimeZone,
+        sourceType
       ]
     );
 
@@ -495,6 +508,13 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     if (cashSessionId) {
       appliedFilters.push(`Sesion caja: ${cashSessionId}`);
     }
+    const sourceTypeLabelMap = {
+      all: 'Todas',
+      pos: 'Solo POS',
+      membership: 'Solo membresias',
+      daily_pass: 'Solo rutina diaria'
+    };
+    appliedFilters.push(`Tipo: ${sourceTypeLabelMap[sourceType] || 'Todas'}`);
     doc.text(`Filtros: ${appliedFilters.join(' | ')}`, 20);
     doc.moveDown();
 

@@ -93,7 +93,8 @@ export function ReportsPage() {
     fechaFin: todayDate,
     cashierUserId: '',
     saleStatus: '',
-    cashSessionId: ''
+    cashSessionId: '',
+    sourceType: 'all'
   });
   const [sellerParams, setSellerParams] = useState({
     fechaInicio: firstDayOfCurrentMonth,
@@ -648,7 +649,8 @@ export function ReportsPage() {
       fechaFin: dailyParams.fechaFin,
       cashier_user_id: dailyParams.cashierUserId,
       status: dailyParams.saleStatus,
-      cash_register_session_id: dailyParams.cashSessionId
+      cash_register_session_id: dailyParams.cashSessionId,
+      source_type: dailyParams.sourceType
     });
 
     fetch(`http://localhost:3001/api/reports/daily-sales/pdf${query}`, {
@@ -1685,6 +1687,20 @@ export function ReportsPage() {
               required
               className="border rounded px-2 py-1"
             />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Tipo de ventas</span>
+            <select
+              name="sourceType"
+              value={dailyParams.sourceType}
+              onChange={handleDailyParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="all">Todas</option>
+              <option value="pos">Solo POS</option>
+              <option value="membership">Solo compras de membresias</option>
+              <option value="daily_pass">Solo pago del dia rutina</option>
+            </select>
           </label>
           <label className="grid gap-1">
             <span className="text-sm font-semibold">Cajero (opcional)</span>
