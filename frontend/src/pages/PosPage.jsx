@@ -645,10 +645,13 @@ export function PosPage() {
           apertura: cashSession.opened_at ? new Date(cashSession.opened_at).toLocaleString('es-NI') : '--',
           recibos_emitidos: cashCloseMetrics.total_receipts_issued || 0,
           recibos_anulados: cashCloseMetrics.total_receipts_voided || 0,
-          total_ventas: Number(cashCloseMetrics.total_sales_amount || 0),
+          ventas_pos: Number(cashCloseMetrics.pos_sales_amount || 0),
+          ventas_membresia: Number(cashCloseMetrics.membership_sales_amount || 0),
+          pagos_rutina_diaria: Number(cashCloseMetrics.daily_pass_sales_amount || 0),
+          total_ventas_canales: Number(cashCloseMetrics.total_sales_all_channels || 0),
+          efectivo_total_cobrado: Number(cashCloseMetrics.all_channels_income_by_payment_method?.cash || 0),
           ingreso_caja: Number(cashCloseMetrics.cash_income || 0),
           egreso_caja: Number(cashCloseMetrics.cash_expense || 0),
-          ingreso_membresia: Number(cashCloseMetrics.membership_income || 0),
           esperado_cierre: Number(cashCloseMetrics.expected_closing_amount || 0),
           monto_cierre_digitado: Number(cashCloseForm.closing_amount || 0)
         }
@@ -1426,6 +1429,9 @@ export function PosPage() {
     return () => window.removeEventListener('keydown', handleKeydown);
   }, [activeView, ticketTotal, keypadTarget, selectedLineIndex, saleForm.items]);
 
+  const isCajaView = activeView === 'cash-movements' || activeView === 'cash-close';
+  const isInventoryView = activeView === 'products' || activeView === 'inventory';
+
   return (
     <div>
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
@@ -1452,43 +1458,77 @@ export function PosPage() {
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            activeView === 'cash-movements'
-              ? 'bg-brand-moss text-white'
-              : 'border border-brand-sand text-brand-forest'
+            isCajaView ? 'bg-brand-moss text-white' : 'border border-brand-sand text-brand-forest'
           }`}
-          onClick={() => setActiveView('cash-movements')}
+          onClick={() => setActiveView('cash-close')}
           type="button"
         >
-          Movimientos de caja
+          Caja
         </button>
         <button
           className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            activeView === 'products' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
-          }`}
-          onClick={() => setActiveView('products')}
-          type="button"
-        >
-          Productos
-        </button>
-        <button
-          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            activeView === 'inventory' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'
+            isInventoryView ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'
           }`}
           onClick={() => setActiveView('inventory')}
           type="button"
         >
           Inventario
         </button>
-        <button
-          className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${
-            activeView === 'cash-close' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'
-          }`}
-          onClick={() => setActiveView('cash-close')}
-          type="button"
-        >
-          Cierre de caja
-        </button>
       </div>
+
+      {isCajaView ? (
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+              activeView === 'cash-movements'
+                ? 'bg-brand-moss text-white'
+                : 'border border-brand-sand text-brand-forest'
+            }`}
+            onClick={() => setActiveView('cash-movements')}
+            type="button"
+          >
+            Movimientos de caja
+          </button>
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+              activeView === 'cash-close'
+                ? 'bg-brand-clay text-white'
+                : 'border border-brand-sand text-brand-forest'
+            }`}
+            onClick={() => setActiveView('cash-close')}
+            type="button"
+          >
+            Cierre de caja
+          </button>
+        </div>
+      ) : null}
+
+      {isInventoryView ? (
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+              activeView === 'products'
+                ? 'bg-brand-forest text-white'
+                : 'border border-brand-sand text-brand-forest'
+            }`}
+            onClick={() => setActiveView('products')}
+            type="button"
+          >
+            Productos
+          </button>
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+              activeView === 'inventory'
+                ? 'bg-brand-clay text-white'
+                : 'border border-brand-sand text-brand-forest'
+            }`}
+            onClick={() => setActiveView('inventory')}
+            type="button"
+          >
+            Inventario
+          </button>
+        </div>
+      ) : null}
 
       {activeView === 'sales' ? (
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_24rem]">
@@ -2049,12 +2089,27 @@ export function PosPage() {
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos emitidos</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ventas POS</p>
                 <p className="mt-3 text-3xl font-bold text-brand-forest">
-                  {cashCloseMetrics.total_receipts_issued || 0}
+                  {formatCurrency(cashCloseMetrics.pos_sales_amount || 0)}
                 </p>
+                <p className="mt-1 text-xs text-brand-forest/70">{cashCloseMetrics.pos_sales_count || 0} recibos</p>
+              </article>
+              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ventas membresia</p>
+                <p className="mt-3 text-3xl font-bold text-brand-forest">
+                  {formatCurrency(cashCloseMetrics.membership_sales_amount || 0)}
+                </p>
+                <p className="mt-1 text-xs text-brand-forest/70">{cashCloseMetrics.membership_sales_count || 0} operaciones</p>
+              </article>
+              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Pagos rutina diaria</p>
+                <p className="mt-3 text-3xl font-bold text-brand-clay">
+                  {formatCurrency(cashCloseMetrics.daily_pass_sales_amount || 0)}
+                </p>
+                <p className="mt-1 text-xs text-brand-forest/70">{cashCloseMetrics.daily_pass_sales_count || 0} pagos</p>
               </article>
               <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
                 <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos anulados</p>
@@ -2062,31 +2117,25 @@ export function PosPage() {
                   {cashCloseMetrics.total_receipts_voided || 0}
                 </p>
               </article>
-              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingresos de caja</p>
-                <p className="mt-3 text-3xl font-bold text-brand-clay">
-                  {formatCurrency(cashCloseMetrics.cash_income || 0)}
-                </p>
-              </article>
-              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Egresos de caja</p>
-                <p className="mt-3 text-3xl font-bold text-rose-600">
-                  {formatCurrency(cashCloseMetrics.cash_expense || 0)}
-                </p>
-              </article>
-              <article className="rounded-[1.75rem] border border-brand-sand/70 bg-white p-4 shadow-panel">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingreso por membresia</p>
-                <p className="mt-3 text-3xl font-bold text-brand-forest">
-                  {formatCurrency(cashCloseMetrics.membership_income || 0)}
-                </p>
-              </article>
             </div>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div className="mt-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
               <article className="rounded-2xl border border-brand-sand/70 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Total ventas de la sesion</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Total ventas (todos los canales)</p>
                 <p className="mt-3 text-3xl font-bold text-brand-clay">
-                  {formatCurrency(cashCloseMetrics.total_sales_amount || 0)}
+                  {formatCurrency(cashCloseMetrics.total_sales_all_channels || 0)}
+                </p>
+              </article>
+              <article className="rounded-2xl border border-brand-sand/70 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Efectivo cobrado total</p>
+                <p className="mt-3 text-3xl font-bold text-brand-forest">
+                  {formatCurrency(cashCloseMetrics.all_channels_income_by_payment_method?.cash || 0)}
+                </p>
+              </article>
+              <article className="rounded-2xl border border-brand-sand/70 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Ingresos / egresos de caja</p>
+                <p className="mt-2 text-base font-semibold text-brand-forest">
+                  +{formatCurrency(cashCloseMetrics.cash_income || 0)} / -{formatCurrency(cashCloseMetrics.cash_expense || 0)}
                 </p>
               </article>
               <article className="rounded-2xl border border-brand-sand/70 p-4">

@@ -110,7 +110,7 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
     [sessionId, session.opened_at, session.closed_at]
   );
 
-  const paymentBreakdownResult = await runner.query(
+  const posPaymentBreakdownResult = await runner.query(
     `SELECT
        p.payment_method,
        COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total
@@ -134,13 +134,99 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
   );
 
   const membershipIncomeResult = await runner.query(
-    `SELECT COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total
+    `WITH membership_payments AS (
+       SELECT
+         p.id,
+         p.payment_method,
+         COALESCE(p.amount, 0)::numeric(12,2) AS amount
+       FROM payments p
+       WHERE p.membership_id IS NOT NULL
+         AND p.paid_at >= $1
+         AND p.paid_at <= COALESCE($2, NOW())
+     ),
+     memberships_without_payment AS (
+       SELECT
+         NULL::bigint AS id,
+         'cash'::text AS payment_method,
+         COALESCE(m.amount_paid, 0)::numeric(12,2) AS amount
+       FROM memberships m
+       WHERE m.amount_paid > 0
+         AND m.created_at >= $1
+         AND m.created_at <= COALESCE($2, NOW())
+         AND NOT EXISTS (
+           SELECT 1
+           FROM payments p2
+           WHERE p2.membership_id = m.id
+         )
+     ),
+     all_membership_entries AS (
+       SELECT * FROM membership_payments
+       UNION ALL
+       SELECT * FROM memberships_without_payment
+     )
+     SELECT
+       COUNT(*)::int AS total_count,
+       COALESCE(SUM(amount), 0)::numeric(12,2) AS total_amount
+     FROM all_membership_entries`,
+    [session.opened_at, session.closed_at]
+  );
+
+  const dailyPassIncomeResult = await runner.query(
+    `SELECT
+       COUNT(*)::int AS total_count,
+       COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total_amount
      FROM payments p
-     LEFT JOIN sales s ON s.id = p.sale_id
-     WHERE (p.membership_id IS NOT NULL OR s.sale_type = 'membership')
+     WHERE p.payment_number LIKE 'DAY-%'
+       AND p.sale_id IS NULL
+       AND p.membership_id IS NULL
        AND p.paid_at >= $1
        AND p.paid_at <= COALESCE($2, NOW())`,
     [session.opened_at, session.closed_at]
+  );
+
+  const allChannelPaymentBreakdownResult = await runner.query(
+    `WITH pos_payments AS (
+       SELECT
+         p.payment_method,
+         COALESCE(p.amount, 0)::numeric(12,2) AS amount
+       FROM payments p
+       INNER JOIN sales s ON s.id = p.sale_id
+       WHERE s.cash_register_session_id = $1
+         AND s.status = 'completed'
+     ),
+     membership_payments AS (
+       SELECT
+         p.payment_method,
+         COALESCE(p.amount, 0)::numeric(12,2) AS amount
+       FROM payments p
+       WHERE p.membership_id IS NOT NULL
+         AND p.paid_at >= $2
+         AND p.paid_at <= COALESCE($3, NOW())
+     ),
+     daily_pass_payments AS (
+       SELECT
+         p.payment_method,
+         COALESCE(p.amount, 0)::numeric(12,2) AS amount
+       FROM payments p
+       WHERE p.payment_number LIKE 'DAY-%'
+         AND p.sale_id IS NULL
+         AND p.membership_id IS NULL
+         AND p.paid_at >= $2
+         AND p.paid_at <= COALESCE($3, NOW())
+     ),
+     all_channel_payments AS (
+       SELECT * FROM pos_payments
+       UNION ALL
+       SELECT * FROM membership_payments
+       UNION ALL
+       SELECT * FROM daily_pass_payments
+     )
+     SELECT
+       payment_method,
+       COALESCE(SUM(amount), 0)::numeric(12,2) AS total
+     FROM all_channel_payments
+     GROUP BY payment_method`,
+    [sessionId, session.opened_at, session.closed_at]
   );
 
   const receiptsIssued = receiptsIssuedResult.rows;
@@ -159,9 +245,23 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
     other: 0
   };
 
-  paymentBreakdownResult.rows.forEach((row) => {
+  posPaymentBreakdownResult.rows.forEach((row) => {
     if (row.payment_method in paymentByMethod) {
       paymentByMethod[row.payment_method] = Number(row.total || 0);
+    }
+  });
+
+  const allChannelsByMethod = {
+    cash: 0,
+    card: 0,
+    transfer: 0,
+    mobile: 0,
+    other: 0
+  };
+
+  allChannelPaymentBreakdownResult.rows.forEach((row) => {
+    if (row.payment_method in allChannelsByMethod) {
+      allChannelsByMethod[row.payment_method] = Number(row.total || 0);
     }
   });
 
@@ -178,9 +278,15 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
     }
   });
 
-  const membershipIncome = Number(membershipIncomeResult.rows[0]?.total || 0);
+  const membershipIncome = Number(membershipIncomeResult.rows[0]?.total_amount || 0);
+  const membershipSalesCount = Number(membershipIncomeResult.rows[0]?.total_count || 0);
+  const dailyPassIncome = Number(dailyPassIncomeResult.rows[0]?.total_amount || 0);
+  const dailyPassSalesCount = Number(dailyPassIncomeResult.rows[0]?.total_count || 0);
+  const posSalesAmount = totalSalesAmount;
+  const posSalesCount = totalReceiptsIssued;
+  const totalSalesAllChannels = posSalesAmount + membershipIncome + dailyPassIncome;
   const expectedClosingAmount =
-    Number(session.opening_amount || 0) + paymentByMethod.cash + cashIncome - cashExpense;
+    Number(session.opening_amount || 0) + allChannelsByMethod.cash + cashIncome - cashExpense;
 
   return {
     session: {
@@ -194,10 +300,19 @@ async function buildCashSessionSummary(sessionId, dbClient = null) {
       total_receipts_issued: totalReceiptsIssued,
       total_receipts_voided: totalReceiptsVoided,
       total_sales_amount: totalSalesAmount,
+      pos_sales_amount: posSalesAmount,
+      pos_sales_count: posSalesCount,
+      membership_sales_amount: membershipIncome,
+      membership_sales_count: membershipSalesCount,
+      daily_pass_sales_amount: dailyPassIncome,
+      daily_pass_sales_count: dailyPassSalesCount,
+      total_sales_all_channels: totalSalesAllChannels,
       income_by_payment_method: paymentByMethod,
+      all_channels_income_by_payment_method: allChannelsByMethod,
       cash_income: cashIncome,
       cash_expense: cashExpense,
       membership_income: membershipIncome,
+      daily_pass_income: dailyPassIncome,
       expected_closing_amount: expectedClosingAmount
     },
     receipts_issued: receiptsIssued,
@@ -249,10 +364,13 @@ cashRegisterRouter.get('/current/summary/pdf', async (request, response, next) =
     doc
       .text(`Recibos emitidos: ${summary.metrics.total_receipts_issued}`)
       .text(`Recibos anulados: ${summary.metrics.total_receipts_voided}`)
-      .text(`Total ventas: C$${summary.metrics.total_sales_amount.toFixed(2)}`)
+      .text(`Ventas POS: C$${summary.metrics.pos_sales_amount.toFixed(2)} (${summary.metrics.pos_sales_count})`)
+      .text(`Ventas membresia: C$${summary.metrics.membership_sales_amount.toFixed(2)} (${summary.metrics.membership_sales_count})`)
+      .text(`Pagos rutina diaria: C$${summary.metrics.daily_pass_sales_amount.toFixed(2)} (${summary.metrics.daily_pass_sales_count})`)
+      .text(`Total ventas (canales): C$${summary.metrics.total_sales_all_channels.toFixed(2)}`)
+      .text(`Efectivo total cobrado: C$${Number(summary.metrics.all_channels_income_by_payment_method?.cash || 0).toFixed(2)}`)
       .text(`Ingresos de caja: C$${summary.metrics.cash_income.toFixed(2)}`)
       .text(`Egresos de caja: C$${summary.metrics.cash_expense.toFixed(2)}`)
-      .text(`Ingreso por membresia: C$${summary.metrics.membership_income.toFixed(2)}`)
       .text(`Esperado al cierre: C$${summary.metrics.expected_closing_amount.toFixed(2)}`)
       .moveDown();
 

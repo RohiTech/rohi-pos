@@ -540,17 +540,30 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     if (rows.length === 0) {
       doc.text('No hay ventas registradas para hoy.');
     } else {
-      // Titulos de columna alineados
-      const startY = doc.y;
-      doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('N° Venta', 20, startY, { width: 215, align: 'left' });
-      doc.text('SubTotal', 240, startY, { width: 65, align: 'right' });
-      doc.text('Impuesto', 310, startY, { width: 65, align: 'right' });
-      doc.text('Total (C$)', 380, startY, { width: 65, align: 'right' });
-      doc.text('Fecha y hora', 450, startY, { width: 105, align: 'left' });
-      doc.moveDown(1);
+      const contentBottomY = doc.page.height - 125;
+      const rowHeight = 16;
+
+      const drawDailySalesHeader = () => {
+        const headerY = doc.y;
+        doc.font('Helvetica-Bold').fontSize(10);
+        doc.text('N° Venta', 20, headerY, { width: 215, align: 'left', lineBreak: false });
+        doc.text('SubTotal', 240, headerY, { width: 65, align: 'right', lineBreak: false });
+        doc.text('Impuesto', 310, headerY, { width: 65, align: 'right', lineBreak: false });
+        doc.text('Total (C$)', 380, headerY, { width: 65, align: 'right', lineBreak: false });
+        doc.text('Fecha y hora', 450, headerY, { width: 105, align: 'left', lineBreak: false });
+        doc.y = headerY + 18;
+      };
+
+      drawDailySalesHeader();
       doc.font('Helvetica').fontSize(10);
-      rows.forEach(row => {
+
+      rows.forEach((row) => {
+        if (doc.y + rowHeight > contentBottomY) {
+          doc.addPage();
+          drawDailySalesHeader();
+          doc.font('Helvetica').fontSize(10);
+        }
+
         const y = doc.y;
         const sourceLabel =
           row.source_type === 'membership'
@@ -569,18 +582,34 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
           hour12: false
         }).format(new Date(row.operation_at));
 
-        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 215, align: 'left' });
-        doc.text(`C$${Number(row.subtotal || 0).toFixed(2)}`, 240, y, { width: 65, align: 'right' });
-        doc.text(`C$${Number(row.tax || 0).toFixed(2)}`, 310, y, { width: 65, align: 'right' });
-        doc.text(`C$${Number(row.total).toFixed(2)}`, 380, y, { width: 65, align: 'right' });
-        doc.text(
-          operationDateText,
-          450,
-          y,
-          { width: 105, align: 'left', lineBreak: false }
-        );
-        doc.moveDown(0.5);
+        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, {
+          width: 215,
+          align: 'left',
+          lineBreak: false
+        });
+        doc.text(`C$${Number(row.subtotal || 0).toFixed(2)}`, 240, y, {
+          width: 65,
+          align: 'right',
+          lineBreak: false
+        });
+        doc.text(`C$${Number(row.tax || 0).toFixed(2)}`, 310, y, {
+          width: 65,
+          align: 'right',
+          lineBreak: false
+        });
+        doc.text(`C$${Number(row.total).toFixed(2)}`, 380, y, {
+          width: 65,
+          align: 'right',
+          lineBreak: false
+        });
+        doc.text(operationDateText, 450, y, { width: 105, align: 'left', lineBreak: false });
+        doc.y = y + rowHeight;
       });
+
+      if (doc.y + 24 > contentBottomY) {
+        doc.addPage();
+      }
+
       doc.moveDown(1);
       const totalsY = doc.y;
       doc.font('Helvetica-Bold');
