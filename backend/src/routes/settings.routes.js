@@ -18,6 +18,8 @@ const SETTINGS_KEYS = [
   'currency_code',
   'time_zone',
   'membership_expiry_alert_days',
+  'routine_base_price',
+  'routine_tax_rate',
   'routine_price',
   'tax_options',
   'company_name',
@@ -37,6 +39,8 @@ const SETTINGS_DESCRIPTIONS = {
   currency_code: 'Codigo de moneda principal del sistema',
   time_zone: 'Zona horaria oficial del gimnasio para reportes y operaciones',
   membership_expiry_alert_days: 'Dias de anticipacion para avisar vencimiento de membresia',
+  routine_base_price: 'Precio base configurado para la rutina',
+  routine_tax_rate: 'Impuesto aplicado a la rutina en porcentaje',
   routine_price: 'Precio configurado para la rutina',
   tax_options: 'Listado de impuestos disponibles para productos en formato JSON',
   company_name: 'Nombre comercial de la empresa',
@@ -91,11 +95,17 @@ function mapSettingsResponse(settings) {
     ];
   }
 
+  const routineBasePrice = Number(settings.routine_base_price || 0);
+  const routineTaxRate = Number(settings.routine_tax_rate || 0);
+  const routinePrice = Number(settings.routine_price || 0);
+
   return {
     currency_code: settings.currency_code || SYSTEM_CURRENCY,
     time_zone: timeZone,
     membership_expiry_alert_days: Number(settings.membership_expiry_alert_days || 3),
-    routine_price: Number(settings.routine_price || 0),
+    routine_base_price: Number.isFinite(routineBasePrice) && routineBasePrice >= 0 ? routineBasePrice : 0,
+    routine_tax_rate: Number.isFinite(routineTaxRate) && routineTaxRate >= 0 ? routineTaxRate : 0,
+    routine_price: Number.isFinite(routinePrice) && routinePrice >= 0 ? routinePrice : 0,
     tax_options: taxOptions,
     company_name: settings.company_name || 'RohiPOS',
     company_motto: settings.company_motto || '',
@@ -149,6 +159,8 @@ settingsRouter.get('/', async (_request, response, next) => {
 settingsRouter.put('/', async (request, response, next) => {
   try {
     const alertDays = Number.parseInt(request.body.membership_expiry_alert_days, 10);
+    const routineBasePrice = Number(request.body.routine_base_price);
+    const routineTaxRate = Number(request.body.routine_tax_rate);
     const routinePrice = Number(request.body.routine_price);
     const companyName = String(request.body.company_name || '').trim();
     const companyMotto = String(request.body.company_motto || '').trim();
@@ -169,6 +181,14 @@ settingsRouter.put('/', async (request, response, next) => {
 
     if (!Number.isInteger(alertDays) || alertDays < 0 || alertDays > 30) {
       throw createHttpError(400, 'membership_expiry_alert_days must be between 0 and 30');
+    }
+
+    if (Number.isNaN(routineBasePrice) || routineBasePrice < 0) {
+      throw createHttpError(400, 'routine_base_price must be greater than or equal to 0');
+    }
+
+    if (Number.isNaN(routineTaxRate) || routineTaxRate < 0 || routineTaxRate > 100) {
+      throw createHttpError(400, 'routine_tax_rate must be between 0 and 100');
     }
 
     if (Number.isNaN(routinePrice) || routinePrice < 0) {
@@ -222,6 +242,8 @@ settingsRouter.put('/', async (request, response, next) => {
     await upsertSetting('currency_code', SYSTEM_CURRENCY);
     await upsertSetting('time_zone', timeZone);
     await upsertSetting('membership_expiry_alert_days', String(alertDays));
+    await upsertSetting('routine_base_price', String(routineBasePrice));
+    await upsertSetting('routine_tax_rate', String(routineTaxRate));
     await upsertSetting('routine_price', String(routinePrice));
     await upsertSetting('tax_options', JSON.stringify(taxOptions));
     await upsertSetting('company_name', companyName);

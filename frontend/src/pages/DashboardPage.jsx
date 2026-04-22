@@ -384,8 +384,8 @@ function HourlyHeatmap({ rows = [], emptyLabel = 'Sin datos' }) {
 
 export function DashboardPage() {
   const { data: membershipsSummary } = useApi(() => apiGet('/memberships/summary'), []);
-  const { data: salesSummary } = useApi(() => apiGet('/sales/summary'), []);
   const { data: memberships } = useApi(() => apiGet('/memberships?limit=30'), []);
+  const [salesSummary, setSalesSummary] = useState(null);
   const [attendanceSummary, setAttendanceSummary] = useState(null);
   const [attendanceDays, setAttendanceDays] = useState(7);
   const [attendanceTrends, setAttendanceTrends] = useState({
@@ -395,6 +395,32 @@ export function DashboardPage() {
     hourly_yesterday: [],
     hourly_historical_average: []
   });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSalesSummary() {
+      try {
+        const response = await apiGet('/sales/summary');
+
+        if (isMounted) {
+          setSalesSummary(response || null);
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setSalesSummary(null);
+        }
+      }
+    }
+
+    loadSalesSummary();
+    const intervalId = window.setInterval(loadSalesSummary, 10000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -567,7 +593,7 @@ export function DashboardPage() {
 
   return (
     <div>
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <MetricCard
           label="Asistencias hoy"
           value={attendanceSummary?.allowed_today ?? '--'}
@@ -575,9 +601,20 @@ export function DashboardPage() {
           accent="clay"
         />
         <MetricCard
-          label="Ingresos hoy"
-          value={formatCurrency(salesSummary?.data?.total_income_today ?? salesSummary?.data?.revenue_today ?? 0)}
-          hint={`POS ${formatCurrency(salesSummary?.data?.revenue_today ?? 0)} · Membresias ${formatCurrency(salesSummary?.data?.memberships_income_today ?? 0)} · Rutina dia ${formatCurrency(salesSummary?.data?.daily_pass_income_today ?? 0)}`}
+          label="Ventas del dia"
+          value={formatCurrency(salesSummary?.data?.ventas_del_dia ?? salesSummary?.data?.total_income_today ?? 0)}
+          hint={`POS ${formatCurrency(salesSummary?.data?.pos_sales_today ?? 0)} · Membresias ${formatCurrency(salesSummary?.data?.memberships_sales_today ?? 0)} · Rutina ${formatCurrency(salesSummary?.data?.daily_pass_sales_today ?? 0)}`}
+          accent="cream"
+        />
+        <MetricCard
+          label="Ingresos del dia"
+          value={formatCurrency(salesSummary?.data?.ingresos_del_dia ?? salesSummary?.data?.revenue_today ?? 0)}
+          hint={`POS ${formatCurrency(salesSummary?.data?.pos_revenue_today ?? salesSummary?.data?.revenue_today ?? 0)} · Membresias ${formatCurrency(salesSummary?.data?.memberships_revenue_today ?? 0)} · Rutina ${formatCurrency(salesSummary?.data?.daily_pass_revenue_today ?? 0)}`}
+        />
+        <MetricCard
+          label="Impuestos"
+          value={formatCurrency(salesSummary?.data?.impuestos_del_dia ?? 0)}
+          hint={`POS ${formatCurrency(salesSummary?.data?.pos_tax_today ?? 0)} · Membresias ${formatCurrency(salesSummary?.data?.memberships_tax_today ?? 0)} · Rutina ${formatCurrency(salesSummary?.data?.daily_pass_tax_today ?? 0)}`}
           accent="cream"
         />
         <MetricCard

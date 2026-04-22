@@ -387,6 +387,7 @@ export function MembershipsPage() {
   function resetMembershipForm() {
     setEditingMembershipId(null);
     setMembershipForm(initialMembershipForm);
+    setClientSearch('');
     setActiveView('membership-form');
   }
 
@@ -458,6 +459,24 @@ export function MembershipsPage() {
     setError('');
 
     try {
+      const trimmedClientSearch = String(clientSearch || '').trim().toLowerCase();
+      const matchedClient = clients.find((client) => {
+        if (!trimmedClientSearch) {
+          return false;
+        }
+
+        const fullLabel = `${client.client_code} - ${client.first_name} ${client.last_name}`.toLowerCase();
+        const clientCode = String(client.client_code || '').toLowerCase();
+        const fullName = `${client.first_name || ''} ${client.last_name || ''}`.trim().toLowerCase();
+
+        return (
+          fullLabel === trimmedClientSearch ||
+          clientCode === trimmedClientSearch ||
+          fullName === trimmedClientSearch
+        );
+      });
+      const resolvedClientId = Number(membershipForm.client_id || matchedClient?.id || 0);
+
       if (editingMembershipId) {
         await apiPut(`/memberships/${editingMembershipId}`, {
           membership_number: membershipForm.membership_number || null,
@@ -469,8 +488,19 @@ export function MembershipsPage() {
           notes: membershipForm.notes || null
         });
       } else {
+        if (!Number.isInteger(resolvedClientId) || resolvedClientId <= 0) {
+          throw new Error('Selecciona un cliente valido desde la lista antes de guardar.');
+        }
+
+        if (matchedClient && !membershipForm.client_id) {
+          setMembershipForm((current) => ({
+            ...current,
+            client_id: String(matchedClient.id)
+          }));
+        }
+
         await apiPost('/memberships', {
-          client_id: Number(membershipForm.client_id),
+          client_id: resolvedClientId,
           plan_id: Number(membershipForm.plan_id),
           membership_number: membershipForm.membership_number || null,
           price: membershipForm.price === '' ? 0 : Number(membershipForm.price),
@@ -484,6 +514,7 @@ export function MembershipsPage() {
 
       setEditingMembershipId(null);
       setMembershipForm(initialMembershipForm);
+      setClientSearch('');
       await loadPageData();
       setActiveView('membership-list');
     } catch (requestError) {
@@ -617,7 +648,7 @@ export function MembershipsPage() {
         <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'plan-list' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => setActiveView('plan-list')} type="button">Planes</button>
         <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'plan-form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => { if (!editingPlanId) setPlanForm(initialPlanForm); setActiveView('plan-form'); }} type="button">{editingPlanId ? 'Editar plan' : 'Nuevo plan'}</button>
         <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'membership-list' ? 'bg-brand-forest text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => setActiveView('membership-list')} type="button">Membresias</button>
-        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'membership-form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => { if (!editingMembershipId) setMembershipForm(initialMembershipForm); setActiveView('membership-form'); }} type="button">{editingMembershipId ? 'Editar membresia' : 'Nueva membresia'}</button>
+        <button className={`rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] ${activeView === 'membership-form' ? 'bg-brand-clay text-white' : 'border border-brand-sand text-brand-forest'}`} onClick={() => { if (!editingMembershipId) { setMembershipForm(initialMembershipForm); setClientSearch(''); } setActiveView('membership-form'); }} type="button">{editingMembershipId ? 'Editar membresia' : 'Nueva membresia'}</button>
       </div>
 
       {activeView === 'plan-form' ? (

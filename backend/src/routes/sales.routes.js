@@ -270,6 +270,7 @@ salesRouter.get('/summary', async (_request, response, next) => {
            s.id,
            s.sold_at::date AS sold_date,
            COALESCE(s.discount, 0)::numeric(14,4) AS global_discount,
+           COALESCE(s.total, 0)::numeric(14,4) AS gross_sale_total,
            COALESCE(
              SUM(
                CASE
@@ -285,11 +286,13 @@ salesRouter.get('/summary', async (_request, response, next) => {
          LEFT JOIN sale_items si ON si.sale_id = s.id
          LEFT JOIN products p ON p.id = si.product_id
          WHERE s.status = 'completed'
-         GROUP BY s.id, s.sold_at::date, s.discount
+         GROUP BY s.id, s.sold_at::date, s.discount, s.total
        ),
-       sales_totals AS (
+       pos_totals AS (
          SELECT
            COUNT(*)::int AS total_sales,
+           COALESCE(SUM(sb.gross_sale_total), 0)::numeric(12,2) AS gross_total,
+           COALESCE(SUM(sb.gross_sale_total) FILTER (WHERE sb.sold_date = CURRENT_DATE), 0)::numeric(12,2) AS gross_today,
            COALESCE(
              SUM(
                GREATEST(
@@ -302,7 +305,7 @@ salesRouter.get('/summary', async (_request, response, next) => {
                )
              ),
              0
-           )::numeric(12,2) AS total_revenue,
+           )::numeric(12,2) AS net_total,
            COALESCE(
              SUM(
                GREATEST(
@@ -315,21 +318,81 @@ salesRouter.get('/summary', async (_request, response, next) => {
                )
              ) FILTER (WHERE sb.sold_date = CURRENT_DATE),
              0
-           )::numeric(12,2) AS revenue_today,
+           )::numeric(12,2) AS net_today,
            COUNT(*) FILTER (WHERE sb.sold_date = CURRENT_DATE)::int AS sales_today
          FROM sales_base_per_sale sb
        ),
-       daily_pass_income AS (
+       routine_pricing AS (
          SELECT
-           COALESCE(SUM(p.amount), 0)::numeric(12,2) AS total_income,
-           COALESCE(SUM(p.amount) FILTER (WHERE p.paid_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
+           COALESCE(
+             (
+               SELECT
+                 CASE
+                   WHEN TRIM(setting_value) ~ '^[0-9]+([.][0-9]+)?$'
+                     THEN TRIM(setting_value)::numeric(12,2)
+                   ELSE 0::numeric(12,2)
+                 END
+               FROM system_settings
+               WHERE setting_key = 'routine_base_price'
+               LIMIT 1
+             ),
+             0::numeric(12,2)
+           ) AS routine_base_price,
+           COALESCE(
+             (
+               SELECT
+                 CASE
+                   WHEN TRIM(setting_value) ~ '^[0-9]+([.][0-9]+)?$'
+                     THEN TRIM(setting_value)::numeric(12,2)
+                   ELSE 0::numeric(12,2)
+                 END
+               FROM system_settings
+               WHERE setting_key = 'routine_price'
+               LIMIT 1
+             ),
+             0::numeric(12,2)
+           ) AS routine_price
+       ),
+       daily_pass_aggregates AS (
+         SELECT
+           COALESCE(SUM(p.amount), 0)::numeric(14,4) AS gross_total,
+           COALESCE(SUM(p.amount) FILTER (WHERE p.paid_at::date = CURRENT_DATE), 0)::numeric(14,4) AS gross_today
          FROM payments p
          WHERE p.payment_number LIKE 'DAY-%'
            AND p.sale_id IS NULL
            AND p.membership_id IS NULL
        ),
+       daily_pass_income AS (
+         SELECT
+           dpa.gross_total::numeric(12,2) AS gross_total,
+           dpa.gross_today::numeric(12,2) AS gross_today,
+           (
+             CASE
+               WHEN rp.routine_price > 0 AND rp.routine_base_price >= 0
+                 THEN dpa.gross_total * (rp.routine_base_price / rp.routine_price)
+               ELSE dpa.gross_total
+             END
+           )::numeric(12,2) AS net_total,
+           (
+             CASE
+               WHEN rp.routine_price > 0 AND rp.routine_base_price >= 0
+                 THEN dpa.gross_today * (rp.routine_base_price / rp.routine_price)
+               ELSE dpa.gross_today
+             END
+           )::numeric(12,2) AS net_today
+         FROM daily_pass_aggregates dpa
+         CROSS JOIN routine_pricing rp
+       ),
        memberships_income AS (
          SELECT
+           COALESCE(
+             SUM(COALESCE(m.amount_paid, 0)),
+             0
+           )::numeric(12,2) AS gross_total,
+           COALESCE(
+             SUM(COALESCE(m.amount_paid, 0)) FILTER (WHERE m.created_at::date = CURRENT_DATE),
+             0
+           )::numeric(12,2) AS gross_today,
            COALESCE(
              SUM(
                CASE
@@ -339,7 +402,7 @@ salesRouter.get('/summary', async (_request, response, next) => {
                END
              ),
              0
-           )::numeric(12,2) AS total_income,
+           )::numeric(12,2) AS net_total,
            COALESCE(
              SUM(
                CASE
@@ -349,23 +412,46 @@ salesRouter.get('/summary', async (_request, response, next) => {
                END
              ) FILTER (WHERE m.created_at::date = CURRENT_DATE),
              0
-           )::numeric(12,2) AS income_today
+           )::numeric(12,2) AS net_today
          FROM memberships m
          LEFT JOIN membership_plans mp ON mp.id = m.plan_id
          WHERE COALESCE(m.amount_paid, 0) > 0
        )
        SELECT
-         st.total_sales,
-         st.total_revenue,
-         st.revenue_today,
-         st.sales_today,
-         dpi.income_today AS daily_pass_income_today,
-         dpi.total_income AS daily_pass_income_total,
-         mi.income_today AS memberships_income_today,
-         mi.total_income AS memberships_income_total,
-         (st.revenue_today + dpi.income_today + mi.income_today)::numeric(12,2) AS total_income_today,
-         (st.total_revenue + dpi.total_income + mi.total_income)::numeric(12,2) AS total_income
-       FROM sales_totals st
+         pt.total_sales,
+         pt.sales_today,
+
+         pt.net_total AS total_revenue,
+         pt.net_today AS revenue_today,
+
+         dpi.gross_today AS daily_pass_income_today,
+         dpi.gross_total AS daily_pass_income_total,
+         mi.gross_today AS memberships_income_today,
+         mi.gross_total AS memberships_income_total,
+
+         pt.gross_today AS pos_sales_today,
+         pt.net_today AS pos_revenue_today,
+         GREATEST(pt.gross_today - pt.net_today, 0)::numeric(12,2) AS pos_tax_today,
+
+         mi.gross_today AS memberships_sales_today,
+         mi.net_today AS memberships_revenue_today,
+         GREATEST(mi.gross_today - mi.net_today, 0)::numeric(12,2) AS memberships_tax_today,
+
+         dpi.gross_today AS daily_pass_sales_today,
+         dpi.net_today AS daily_pass_revenue_today,
+         GREATEST(dpi.gross_today - dpi.net_today, 0)::numeric(12,2) AS daily_pass_tax_today,
+
+         (pt.gross_today + mi.gross_today + dpi.gross_today)::numeric(12,2) AS ventas_del_dia,
+         (pt.net_today + mi.net_today + dpi.net_today)::numeric(12,2) AS ingresos_del_dia,
+         (
+           GREATEST(pt.gross_today - pt.net_today, 0) +
+           GREATEST(mi.gross_today - mi.net_today, 0) +
+           GREATEST(dpi.gross_today - dpi.net_today, 0)
+         )::numeric(12,2) AS impuestos_del_dia,
+
+         (pt.gross_total + mi.gross_total + dpi.gross_total)::numeric(12,2) AS total_income,
+         (pt.gross_today + mi.gross_today + dpi.gross_today)::numeric(12,2) AS total_income_today
+       FROM pos_totals pt
        CROSS JOIN daily_pass_income dpi
        CROSS JOIN memberships_income mi`
     );

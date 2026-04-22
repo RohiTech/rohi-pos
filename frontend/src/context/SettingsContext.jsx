@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   currency_code: 'NIO',
   time_zone: 'America/Managua',
   membership_expiry_alert_days: 3,
+  routine_base_price: 0,
+  routine_tax_rate: 0,
   routine_price: 0,
   tax_options: [
     { name: 'Exento', rate: 0 },
@@ -40,6 +42,8 @@ function normalizeSettings(raw = {}) {
     currency_code: raw.currency_code || 'NIO',
     time_zone: raw.time_zone || 'America/Managua',
     membership_expiry_alert_days: Number(raw.membership_expiry_alert_days || 3),
+    routine_base_price: Number(raw.routine_base_price || 0),
+    routine_tax_rate: Number(raw.routine_tax_rate || 0),
     routine_price: Number(raw.routine_price || 0),
     tax_options:
       normalizedTaxOptions.length > 0

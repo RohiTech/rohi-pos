@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DataPanel } from '../components/DataPanel';
 import { useSettings } from '../context/SettingsContext';
 
@@ -14,6 +14,34 @@ const TIME_ZONE_OPTIONS = [
   { value: 'UTC', label: 'UTC' }
 ];
 
+function toNonNegativeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function toTaxRate(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  if (parsed > 100) {
+    return 100;
+  }
+
+  return parsed;
+}
+
+function calculateRoutinePrice(basePrice, taxRate) {
+  const base = toNonNegativeNumber(basePrice, 0);
+  const tax = toTaxRate(taxRate, 0);
+  return Number((base * (1 + tax / 100)).toFixed(2));
+}
+
 export function SettingsPage() {
   const { settings, loading, updateSettings, updateBranding } = useSettings();
   const [companyName, setCompanyName] = useState(settings.company_name || 'RohiPOS');
@@ -25,7 +53,8 @@ export function SettingsPage() {
   const [companyAddress, setCompanyAddress] = useState(settings.company_address || '');
   const [timeZone, setTimeZone] = useState(settings.time_zone || 'America/Managua');
   const [alertDays, setAlertDays] = useState(settings.membership_expiry_alert_days || 3);
-  const [routinePrice, setRoutinePrice] = useState(settings.routine_price || 0);
+  const [routineBasePrice, setRoutineBasePrice] = useState(settings.routine_base_price || 0);
+  const [routineTaxRate, setRoutineTaxRate] = useState(settings.routine_tax_rate || 0);
   const [taxOptions, setTaxOptions] = useState(
     settings.tax_options || [
       { name: 'Exento', rate: 0 },
@@ -45,8 +74,14 @@ export function SettingsPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  const routinePrice = useMemo(
+    () => calculateRoutinePrice(routineBasePrice, routineTaxRate),
+    [routineBasePrice, routineTaxRate]
+  );
+
   useEffect(() => {
-    setRoutinePrice(settings.routine_price || 0);
+    setRoutineBasePrice(toNonNegativeNumber(settings.routine_base_price, 0));
+    setRoutineTaxRate(toTaxRate(settings.routine_tax_rate, 0));
     setTaxOptions(
       settings.tax_options || [
         { name: 'Exento', rate: 0 },
@@ -72,7 +107,8 @@ export function SettingsPage() {
     settings.company_address,
     settings.time_zone,
     settings.membership_expiry_alert_days,
-    settings.routine_price,
+    settings.routine_base_price,
+    settings.routine_tax_rate,
     settings.tax_options
   ]);
 
@@ -97,6 +133,30 @@ export function SettingsPage() {
     setTaxOptions((current) => (current.length <= 1 ? current : current.filter((_, i) => i !== index)));
   }
 
+  function buildSettingsPayload() {
+    const normalizedRoutineBasePrice = toNonNegativeNumber(routineBasePrice, 0);
+    const normalizedRoutineTaxRate = toTaxRate(routineTaxRate, 0);
+
+    return {
+      company_name: String(companyName || '').trim(),
+      company_motto: String(companyMotto || '').trim(),
+      company_legal_name: String(companyLegalName || '').trim(),
+      company_ruc: String(companyRuc || '').trim(),
+      company_phone: String(companyPhone || '').trim(),
+      company_email: String(companyEmail || '').trim(),
+      company_address: String(companyAddress || '').trim(),
+      time_zone: String(timeZone || 'America/Managua').trim(),
+      membership_expiry_alert_days: Number(alertDays),
+      routine_base_price: normalizedRoutineBasePrice,
+      routine_tax_rate: normalizedRoutineTaxRate,
+      routine_price: calculateRoutinePrice(normalizedRoutineBasePrice, normalizedRoutineTaxRate),
+      tax_options: taxOptions.map((option) => ({
+        name: String(option.name || '').trim(),
+        rate: Number(option.rate || 0)
+      }))
+    };
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setSaving(true);
@@ -104,22 +164,7 @@ export function SettingsPage() {
     setError('');
 
     try {
-      await updateSettings({
-        company_name: String(companyName || '').trim(),
-        company_motto: String(companyMotto || '').trim(),
-        company_legal_name: String(companyLegalName || '').trim(),
-        company_ruc: String(companyRuc || '').trim(),
-        company_phone: String(companyPhone || '').trim(),
-        company_email: String(companyEmail || '').trim(),
-        company_address: String(companyAddress || '').trim(),
-        time_zone: String(timeZone || 'America/Managua').trim(),
-        membership_expiry_alert_days: Number(alertDays),
-        routine_price: Number(routinePrice),
-        tax_options: taxOptions.map((option) => ({
-          name: String(option.name || '').trim(),
-          rate: Number(option.rate || 0)
-        }))
-      });
+      await updateSettings(buildSettingsPayload());
       setMessage('Configuracion guardada correctamente.');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible guardar la configuracion');
@@ -229,18 +274,6 @@ export function SettingsPage() {
                 />
               </label>
 
-              <label className="grid gap-2">
-                <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
-                <input
-                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-                  min="0"
-                  onChange={(event) => setRoutinePrice(event.target.value)}
-                  step="0.01"
-                  type="number"
-                  value={routinePrice}
-                />
-              </label>
-
               <div className="grid gap-3 rounded-2xl border border-brand-sand bg-brand-cream/30 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-brand-forest">Impuestos disponibles</span>
@@ -288,6 +321,53 @@ export function SettingsPage() {
                 type="submit"
               >
                 {saving ? 'Guardando...' : 'Guardar configuracion'}
+              </button>
+            </form>
+          </DataPanel>
+
+          <DataPanel title="Precio de rutina" subtitle="Define precio base, impuesto y precio final aplicado en caja.">
+            <form className="grid gap-4" onSubmit={handleSubmit}>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Precio base</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  min="0"
+                  onChange={(event) => setRoutineBasePrice(event.target.value)}
+                  step="0.01"
+                  type="number"
+                  value={routineBasePrice}
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Impuesto (%)</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  max="100"
+                  min="0"
+                  onChange={(event) => setRoutineTaxRate(event.target.value)}
+                  step="0.01"
+                  type="number"
+                  value={routineTaxRate}
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Precio de la rutina</span>
+                <input
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/30 px-4 py-3 text-brand-forest/80"
+                  readOnly
+                  type="number"
+                  value={routinePrice}
+                />
+              </label>
+
+              <button
+                className="rounded-2xl bg-brand-forest px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                disabled={saving || loading}
+                type="submit"
+              >
+                {saving ? 'Guardando...' : 'Guardar precio rutina'}
               </button>
             </form>
           </DataPanel>

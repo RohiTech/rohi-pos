@@ -295,10 +295,29 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
     const includeAdditionalIncome = (!saleStatus || saleStatus === 'completed') && !cashSessionId;
 
     const { rows } = await query(
-      `WITH pos_sales AS (
+      `WITH routine_pricing AS (
+         SELECT
+           COALESCE(
+             (
+               SELECT CASE
+                 WHEN TRIM(setting_value) ~ '^[0-9]+([.][0-9]+)?$'
+                   THEN TRIM(setting_value)::numeric(12,2)
+                 ELSE 0::numeric(12,2)
+               END
+               FROM system_settings
+               WHERE setting_key = 'routine_base_price'
+               LIMIT 1
+             ),
+             0::numeric(12,2)
+           ) AS routine_base_price
+       ),
+       pos_sales_source AS (
          SELECT
            s.sale_number AS operation_number,
-           s.total,
+           COALESCE(s.total, 0)::numeric(12,2) AS total,
+           COALESCE(s.discount, 0)::numeric(12,2) AS global_discount,
+           COALESCE(sa.base_lines_total, 0)::numeric(14,4) AS base_lines_total,
+           COALESCE(sa.gross_lines_total, 0)::numeric(14,4) AS gross_lines_total,
            s.sold_at AS operation_at,
            s.cashier_user_id,
            u.username AS cashier_username,
@@ -307,15 +326,60 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            'pos'::text AS source_type
          FROM sales s
          LEFT JOIN users u ON u.id = s.cashier_user_id
+         LEFT JOIN (
+           SELECT
+             si.sale_id,
+             COALESCE(
+               SUM(
+                 CASE
+                   WHEN si.item_type = 'product' AND COALESCE(p.tax_rate, 0) > 0
+                     THEN si.line_total / (1 + COALESCE(p.tax_rate, 0) / 100.0)
+                   ELSE si.line_total
+                 END
+               ),
+               0
+             )::numeric(14,4) AS base_lines_total,
+             COALESCE(SUM(si.line_total), 0)::numeric(14,4) AS gross_lines_total
+           FROM sale_items si
+           LEFT JOIN products p ON p.id = si.product_id
+           GROUP BY si.sale_id
+         ) sa ON sa.sale_id = s.id
          WHERE (s.sold_at AT TIME ZONE $7)::date BETWEEN $1::date AND $2::date
            AND ($5::text IS NULL OR s.status = $5::text)
            AND ($5::text IS NOT NULL OR s.status = 'completed')
            AND ($4::bigint IS NULL OR s.cashier_user_id = $4::bigint)
            AND ($6::bigint IS NULL OR s.cash_register_session_id = $6::bigint)
        ),
+       pos_sales AS (
+         SELECT
+           pss.operation_number,
+           calc.base_subtotal AS subtotal,
+           GREATEST(pss.total - calc.base_subtotal, 0)::numeric(12,2) AS tax,
+           pss.total,
+           pss.operation_at,
+           pss.cashier_user_id,
+           pss.cashier_username,
+           pss.status,
+           pss.cash_register_session_id,
+           pss.source_type
+         FROM pos_sales_source pss
+         CROSS JOIN LATERAL (
+           SELECT
+             GREATEST(
+               CASE
+                 WHEN pss.gross_lines_total > 0
+                   THEN pss.base_lines_total - (pss.global_discount * (pss.base_lines_total / pss.gross_lines_total))
+                 ELSE pss.base_lines_total
+               END,
+               0
+             )::numeric(12,2) AS base_subtotal
+         ) calc
+       ),
        memberships_income AS (
          SELECT
            p.payment_number AS operation_number,
+           p.amount AS subtotal,
+           0::numeric(12,2) AS tax,
            p.amount AS total,
            p.paid_at AS operation_at,
            p.received_by_user_id AS cashier_user_id,
@@ -334,6 +398,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
 
          SELECT
            m.membership_number AS operation_number,
+           m.amount_paid AS subtotal,
+           0::numeric(12,2) AS tax,
            m.amount_paid AS total,
            m.created_at AS operation_at,
            m.sold_by_user_id AS cashier_user_id,
@@ -356,6 +422,14 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
        daily_pass_income AS (
          SELECT
            p.payment_number AS operation_number,
+           CASE
+             WHEN rp.routine_base_price > 0 THEN rp.routine_base_price
+             ELSE p.amount
+           END::numeric(12,2) AS subtotal,
+           CASE
+             WHEN rp.routine_base_price > 0 THEN GREATEST(p.amount - rp.routine_base_price, 0)
+             ELSE 0::numeric
+           END::numeric(12,2) AS tax,
            p.amount AS total,
            p.paid_at AS operation_at,
            p.received_by_user_id AS cashier_user_id,
@@ -365,6 +439,7 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
            'daily_pass'::text AS source_type
          FROM payments p
          LEFT JOIN users u ON u.id = p.received_by_user_id
+         CROSS JOIN routine_pricing rp
          WHERE $3::boolean = TRUE
            AND p.payment_number LIKE 'DAY-%'
            AND p.sale_id IS NULL
@@ -394,6 +469,8 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
 
     // Totales
     const totalVentas = rows.length;
+    const subtotalTotal = rows.reduce((sum, row) => sum + Number(row.subtotal || 0), 0);
+    const ivaTotal = rows.reduce((sum, row) => sum + Number(row.tax || 0), 0);
     const montoTotal = rows.reduce((sum, row) => sum + Number(row.total), 0);
 
     // Crear PDF
@@ -427,10 +504,11 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
       // Titulos de columna alineados
       const startY = doc.y;
       doc.font('Helvetica-Bold').fontSize(10);
-      doc.text('N° Venta', 20, startY, { width: 200, align: 'left' });
-      doc.text('Total (C$)', 230, startY, { width: 80, align: 'right' });
-      doc.text('Fecha y hora', 320, startY, { width: 140, align: 'center' });
-      doc.text('Cajero', 470, startY, { width: 70, align: 'center' });
+      doc.text('N° Venta', 20, startY, { width: 215, align: 'left' });
+      doc.text('SubTotal', 240, startY, { width: 65, align: 'right' });
+      doc.text('Impuesto', 310, startY, { width: 65, align: 'right' });
+      doc.text('Total (C$)', 380, startY, { width: 65, align: 'right' });
+      doc.text('Fecha y hora', 450, startY, { width: 105, align: 'left' });
       doc.moveDown(1);
       doc.font('Helvetica').fontSize(10);
       rows.forEach(row => {
@@ -441,23 +519,38 @@ reportsRouter.get('/daily-sales/pdf', async (req, res, next) => {
             : row.source_type === 'daily_pass'
               ? 'Rutina diaria'
               : 'POS';
-        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 200, align: 'left' });
-        doc.text(`C$${Number(row.total).toFixed(2)}`, 230, y, { width: 80, align: 'right' });
+        const operationDateText = new Intl.DateTimeFormat('es-NI', {
+          timeZone: systemTimeZone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).format(new Date(row.operation_at));
+
+        doc.text(`${row.operation_number} (${sourceLabel})`, 20, y, { width: 215, align: 'left' });
+        doc.text(`C$${Number(row.subtotal || 0).toFixed(2)}`, 240, y, { width: 65, align: 'right' });
+        doc.text(`C$${Number(row.tax || 0).toFixed(2)}`, 310, y, { width: 65, align: 'right' });
+        doc.text(`C$${Number(row.total).toFixed(2)}`, 380, y, { width: 65, align: 'right' });
         doc.text(
-          new Date(row.operation_at).toLocaleString('es-NI', { timeZone: systemTimeZone }),
-          320,
+          operationDateText,
+          450,
           y,
-          { width: 140, align: 'center' }
+          { width: 105, align: 'left', lineBreak: false }
         );
-        doc.text(row.cashier_username || String(row.cashier_user_id), 470, y, { width: 70, align: 'center' });
         doc.moveDown(0.5);
       });
       doc.moveDown(1);
+      const totalsY = doc.y;
       doc.font('Helvetica-Bold');
-      doc.text('Totales:', 20, doc.y, { continued: true });
+      doc.text('Totales:', 20, totalsY, { width: 95, align: 'left' });
       doc.font('Helvetica');
-      doc.text(`Cantidad Ventas: ${totalVentas}`, 120, doc.y, { continued: true });
-      doc.text(`Monto Total: C$${montoTotal.toFixed(2)}`, 280, doc.y);
+      doc.text(`Cantidad Ventas: ${totalVentas}`, 120, totalsY, { width: 115, align: 'left' });
+      doc.text(`C$${subtotalTotal.toFixed(2)}`, 240, totalsY, { width: 65, align: 'right' });
+      doc.text(`C$${ivaTotal.toFixed(2)}`, 310, totalsY, { width: 65, align: 'right' });
+      doc.text(`C$${montoTotal.toFixed(2)}`, 380, totalsY, { width: 65, align: 'right' });
     }
 
     // Pie de página personalizado
