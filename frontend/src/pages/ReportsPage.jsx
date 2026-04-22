@@ -11,6 +11,9 @@ const reportModules = [
     items: [
       'Ventas diarias',
       'Ventas por producto',
+      'Top clientes',
+      'Productos más vendidos',
+      'Ventas por horario',
       'Resumen de caja',
       'Ventas por vendedor',
       'Flujo de efectivo',
@@ -21,7 +24,13 @@ const reportModules = [
   {
     title: 'Clientes',
     description: 'Informes sobre cartera, crecimiento y retención.',
-    items: ['Clientes activos', 'Clientes nuevos', 'Clientes inactivos', 'Membresías por cliente']
+    items: [
+      'Clientes activos',
+      'Clientes nuevos',
+      'Clientes inactivos',
+      'Clientes que no han venido en X días',
+      'Membresías por cliente'
+    ]
   },
   {
     title: 'Membresías',
@@ -30,6 +39,7 @@ const reportModules = [
       'Membresías vigentes',
       'Membresías por plan',
       'Renovaciones próximas',
+      'Membresías por vencer (3-5 días)',
       'Ingresos recurrentes',
       'Membresías vencidas',
       'Tasa de renovación',
@@ -99,10 +109,12 @@ export function ReportsPage() {
   const [openActiveClientsModal, setOpenActiveClientsModal] = useState(false);
   const [openNewClientsModal, setOpenNewClientsModal] = useState(false);
   const [openInactiveClientsModal, setOpenInactiveClientsModal] = useState(false);
+  const [openNoVisitDaysModal, setOpenNoVisitDaysModal] = useState(false);
   const [openMembershipsByClientModal, setOpenMembershipsByClientModal] = useState(false);
   const [openActiveMembershipsModal, setOpenActiveMembershipsModal] = useState(false);
   const [openMembershipsByPlanModal, setOpenMembershipsByPlanModal] = useState(false);
   const [openUpcomingRenewalsModal, setOpenUpcomingRenewalsModal] = useState(false);
+  const [openMembershipsExpiringWindowModal, setOpenMembershipsExpiringWindowModal] = useState(false);
   const [openRecurringIncomeModal, setOpenRecurringIncomeModal] = useState(false);
   const [openExpiredMembershipsModal, setOpenExpiredMembershipsModal] = useState(false);
   const [openRenewalRateModal, setOpenRenewalRateModal] = useState(false);
@@ -122,6 +134,9 @@ export function ReportsPage() {
   const [openCashFlowModal, setOpenCashFlowModal] = useState(false);
   const [openIncomeByMethodModal, setOpenIncomeByMethodModal] = useState(false);
   const [openSalesVsIncomeModal, setOpenSalesVsIncomeModal] = useState(false);
+  const [openTopClientsModal, setOpenTopClientsModal] = useState(false);
+  const [openTopProductsModal, setOpenTopProductsModal] = useState(false);
+  const [openSalesByHourModal, setOpenSalesByHourModal] = useState(false);
   const [dailyParams, setDailyParams] = useState({
     fechaInicio: todayDate,
     fechaFin: todayDate,
@@ -174,6 +189,12 @@ export function ReportsPage() {
     search: '',
     withMembership: false
   });
+  const [noVisitDaysParams, setNoVisitDaysParams] = useState({
+    asOfDate: todayDate,
+    inactivityDays: '30',
+    search: '',
+    onlyActiveClients: true
+  });
   const [membershipsByClientParams, setMembershipsByClientParams] = useState({
     fechaInicio: firstDayOfCurrentMonth,
     fechaFin: todayDate,
@@ -198,6 +219,14 @@ export function ReportsPage() {
   const [upcomingRenewalsParams, setUpcomingRenewalsParams] = useState({
     asOfDate: getTodayDateString(),
     daysAhead: '7',
+    planId: '',
+    search: '',
+    onlyActiveClients: true
+  });
+  const [membershipsExpiringWindowParams, setMembershipsExpiringWindowParams] = useState({
+    asOfDate: todayDate,
+    minDays: '3',
+    maxDays: '5',
     planId: '',
     search: '',
     onlyActiveClients: true
@@ -241,6 +270,9 @@ export function ReportsPage() {
     fechaInicio: firstDayOfCurrentMonth,
     fechaFin: todayDate
   });
+  const [kardexProductSearch, setKardexProductSearch] = useState('');
+  const [kardexProductSuggestions, setKardexProductSuggestions] = useState([]);
+  const [loadingKardexProductSuggestions, setLoadingKardexProductSuggestions] = useState(false);
   const [attendanceDailyParams, setAttendanceDailyParams] = useState({
     fechaInicio: todayDate,
     fechaFin: todayDate
@@ -263,6 +295,20 @@ export function ReportsPage() {
     fechaFin: todayDate
   });
   const [financialParams, setFinancialParams] = useState({
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate
+  });
+  const [topClientsParams, setTopClientsParams] = useState({
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
+    limit: '10'
+  });
+  const [topProductsParams, setTopProductsParams] = useState({
+    fechaInicio: firstDayOfCurrentMonth,
+    fechaFin: todayDate,
+    limit: '10'
+  });
+  const [salesByHourParams, setSalesByHourParams] = useState({
     fechaInicio: firstDayOfCurrentMonth,
     fechaFin: todayDate
   });
@@ -402,6 +448,7 @@ export function ReportsPage() {
       || openActiveMembershipsModal
       || openMembershipsByPlanModal
       || openUpcomingRenewalsModal
+      || openMembershipsExpiringWindowModal
       || openRecurringIncomeModal
     )) {
       return () => {
@@ -429,13 +476,14 @@ export function ReportsPage() {
     openActiveMembershipsModal,
     openMembershipsByPlanModal,
     openUpcomingRenewalsModal,
+    openMembershipsExpiringWindowModal,
     openRecurringIncomeModal
   ]);
 
   useEffect(() => {
     let isMounted = true;
 
-    if (!(openInventoryMovementsModal || openProductKardexModal)) {
+    if (!openInventoryMovementsModal) {
       return () => {
         isMounted = false;
       };
@@ -456,7 +504,54 @@ export function ReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [openInventoryMovementsModal, openProductKardexModal]);
+  }, [openInventoryMovementsModal]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!openProductKardexModal) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const term = kardexProductSearch.trim();
+    if (term.length < 2) {
+      setKardexProductSuggestions([]);
+      setLoadingKardexProductSuggestions(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setLoadingKardexProductSuggestions(true);
+    apiGet(
+      `/products${buildQueryString({
+        search: term,
+        active: true,
+        limit: 8
+      })}`
+    )
+      .then((response) => {
+        if (isMounted) {
+          setKardexProductSuggestions(response.data || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setKardexProductSuggestions([]);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoadingKardexProductSuggestions(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [openProductKardexModal, kardexProductSearch]);
 
   const handleOpenDailySales = () => setOpenDailySalesModal(true);
   const handleCloseDailySales = () => setOpenDailySalesModal(false);
@@ -476,6 +571,8 @@ export function ReportsPage() {
   const handleCloseNewClients = () => setOpenNewClientsModal(false);
   const handleOpenInactiveClients = () => setOpenInactiveClientsModal(true);
   const handleCloseInactiveClients = () => setOpenInactiveClientsModal(false);
+  const handleOpenNoVisitDays = () => setOpenNoVisitDaysModal(true);
+  const handleCloseNoVisitDays = () => setOpenNoVisitDaysModal(false);
   const handleOpenMembershipsByClient = () => setOpenMembershipsByClientModal(true);
   const handleCloseMembershipsByClient = () => setOpenMembershipsByClientModal(false);
   const handleOpenActiveMemberships = () => setOpenActiveMembershipsModal(true);
@@ -484,6 +581,8 @@ export function ReportsPage() {
   const handleCloseMembershipsByPlan = () => setOpenMembershipsByPlanModal(false);
   const handleOpenUpcomingRenewals = () => setOpenUpcomingRenewalsModal(true);
   const handleCloseUpcomingRenewals = () => setOpenUpcomingRenewalsModal(false);
+  const handleOpenMembershipsExpiringWindow = () => setOpenMembershipsExpiringWindowModal(true);
+  const handleCloseMembershipsExpiringWindow = () => setOpenMembershipsExpiringWindowModal(false);
   const handleOpenRecurringIncome = () => setOpenRecurringIncomeModal(true);
   const handleCloseRecurringIncome = () => setOpenRecurringIncomeModal(false);
   const handleOpenExpiredMemberships = () => setOpenExpiredMembershipsModal(true);
@@ -499,7 +598,11 @@ export function ReportsPage() {
   const handleOpenInventoryMovements = () => setOpenInventoryMovementsModal(true);
   const handleCloseInventoryMovements = () => setOpenInventoryMovementsModal(false);
   const handleOpenProductKardex = () => setOpenProductKardexModal(true);
-  const handleCloseProductKardex = () => setOpenProductKardexModal(false);
+  const handleCloseProductKardex = () => {
+    setOpenProductKardexModal(false);
+    setKardexProductSuggestions([]);
+    setLoadingKardexProductSuggestions(false);
+  };
   const handleOpenAttendanceDaily = () => setOpenAttendanceDailyModal(true);
   const handleCloseAttendanceDaily = () => setOpenAttendanceDailyModal(false);
   const handleOpenAttendanceByClient = () => setOpenAttendanceByClientModal(true);
@@ -522,6 +625,12 @@ export function ReportsPage() {
   const handleCloseIncomeByMethod = () => setOpenIncomeByMethodModal(false);
   const handleOpenSalesVsIncome = () => setOpenSalesVsIncomeModal(true);
   const handleCloseSalesVsIncome = () => setOpenSalesVsIncomeModal(false);
+  const handleOpenTopClients = () => setOpenTopClientsModal(true);
+  const handleCloseTopClients = () => setOpenTopClientsModal(false);
+  const handleOpenTopProducts = () => setOpenTopProductsModal(true);
+  const handleCloseTopProducts = () => setOpenTopProductsModal(false);
+  const handleOpenSalesByHour = () => setOpenSalesByHourModal(true);
+  const handleCloseSalesByHour = () => setOpenSalesByHourModal(false);
   const handleParamsChange = (e) => {
     const { name, value } = e.target;
 
@@ -577,6 +686,14 @@ export function ReportsPage() {
     }));
   };
 
+  const handleNoVisitDaysParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setNoVisitDaysParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
   const handleMembershipsByClientParamsChange = (e) => {
     const { name, value, type, checked } = e.target;
     setMembershipsByClientParams((prev) => ({
@@ -601,6 +718,14 @@ export function ReportsPage() {
   const handleUpcomingRenewalsParamsChange = (e) => {
     const { name, value, type, checked } = e.target;
     setUpcomingRenewalsParams((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleMembershipsExpiringWindowParamsChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setMembershipsExpiringWindowParams((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
@@ -656,6 +781,21 @@ export function ReportsPage() {
     }));
   };
 
+  const handleKardexProductSearchChange = (e) => {
+    const value = e.target.value;
+    setKardexProductSearch(value);
+    setProductKardexParams((prev) => ({ ...prev, productId: '' }));
+  };
+
+  const handleSelectKardexProduct = (product) => {
+    setProductKardexParams((prev) => ({
+      ...prev,
+      productId: String(product.id)
+    }));
+    setKardexProductSearch(product.name);
+    setKardexProductSuggestions([]);
+  };
+
   const handleAttendanceDailyParamsChange = (e) => {
     const { name, value } = e.target;
     setAttendanceDailyParams((prev) => ({ ...prev, [name]: value }));
@@ -679,6 +819,21 @@ export function ReportsPage() {
   const handleFinancialParamsChange = (e) => {
     const { name, value } = e.target;
     setFinancialParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleTopClientsParamsChange = (e) => {
+    const { name, value } = e.target;
+    setTopClientsParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleTopProductsParamsChange = (e) => {
+    const { name, value } = e.target;
+    setTopProductsParams((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSalesByHourParamsChange = (e) => {
+    const { name, value } = e.target;
+    setSalesByHourParams((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSelectProduct = (product) => {
@@ -931,6 +1086,40 @@ export function ReportsPage() {
     setOpenInactiveClientsModal(false);
   };
 
+  const handleNoVisitDaysReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      as_of_date: noVisitDaysParams.asOfDate,
+      inactivity_days: noVisitDaysParams.inactivityDays,
+      search: noVisitDaysParams.search.trim(),
+      only_active_clients: noVisitDaysParams.onlyActiveClients
+    });
+
+    fetch(`http://localhost:3001/api/reports/clients-no-visit-days/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clientes_sin_visita_x_dias.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenNoVisitDaysModal(false);
+  };
+
   const handleMembershipsByClientReport = async (e) => {
     e.preventDefault();
     const query = buildQueryString({
@@ -1069,6 +1258,42 @@ export function ReportsPage() {
       .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
 
     setOpenUpcomingRenewalsModal(false);
+  };
+
+  const handleMembershipsExpiringWindowReport = async (e) => {
+    e.preventDefault();
+    const query = buildQueryString({
+      as_of_date: membershipsExpiringWindowParams.asOfDate,
+      min_days: membershipsExpiringWindowParams.minDays,
+      max_days: membershipsExpiringWindowParams.maxDays,
+      plan_id: membershipsExpiringWindowParams.planId,
+      search: membershipsExpiringWindowParams.search.trim(),
+      only_active_clients: membershipsExpiringWindowParams.onlyActiveClients
+    });
+
+    fetch(`http://localhost:3001/api/reports/memberships-expiring-window/pdf${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'membresias_por_vencer_3_5_dias.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenMembershipsExpiringWindowModal(false);
   };
 
   const handleRecurringIncomeReport = async (e) => {
@@ -1307,6 +1532,12 @@ export function ReportsPage() {
 
   const handleProductKardexReport = async (e) => {
     e.preventDefault();
+
+    if (!productKardexParams.productId) {
+      alert('Seleccione un producto de la lista de búsqueda.');
+      return;
+    }
+
     const query = buildQueryString({
       product_id: productKardexParams.productId,
       fechaInicio: productKardexParams.fechaInicio,
@@ -1695,6 +1926,104 @@ export function ReportsPage() {
     setOpenSalesVsIncomeModal(false);
   };
 
+  const handleTopClientsReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: topClientsParams.fechaInicio,
+      fechaFin: topClientsParams.fechaFin,
+      limit: topClientsParams.limit
+    });
+
+    fetch(`http://localhost:3001/api/reports/top-clients/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'top_clientes.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenTopClientsModal(false);
+  };
+
+  const handleTopProductsReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: topProductsParams.fechaInicio,
+      fechaFin: topProductsParams.fechaFin,
+      limit: topProductsParams.limit
+    });
+
+    fetch(`http://localhost:3001/api/reports/top-products/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'productos_mas_vendidos.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenTopProductsModal(false);
+  };
+
+  const handleSalesByHourReport = async (e) => {
+    e.preventDefault();
+    const reportQuery = buildQueryString({
+      fechaInicio: salesByHourParams.fechaInicio,
+      fechaFin: salesByHourParams.fechaFin
+    });
+
+    fetch(`http://localhost:3001/api/reports/sales-by-hour/pdf${reportQuery}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('No se pudo descargar el PDF');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ventas_por_horario.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch(() => alert('No se pudo descargar el PDF. ¿Sesión expirada?'));
+
+    setOpenSalesByHourModal(false);
+  };
+
   return (
     <div>
       <PageHeader
@@ -1720,6 +2049,27 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenProductSales}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Top clientes' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenTopClients}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Productos más vendidos' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenTopProducts}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Ventas por horario' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenSalesByHour}
                     >
                       {report}
                     </button>
@@ -1779,6 +2129,13 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
+                  ) : report === 'Clientes que no han venido en X días' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenNoVisitDays}
+                    >
+                      {report}
+                    </button>
                   ) : report === 'Membresías por cliente' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
@@ -1804,6 +2161,13 @@ export function ReportsPage() {
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenUpcomingRenewals}
+                    >
+                      {report}
+                    </button>
+                  ) : report === 'Membresías por vencer (3-5 días)' ? (
+                    <button
+                      className="font-semibold text-brand-forest hover:underline"
+                      onClick={handleOpenMembershipsExpiringWindow}
                     >
                       {report}
                     </button>
@@ -2386,6 +2750,140 @@ export function ReportsPage() {
         </form>
       </SimpleModal>
 
+      <SimpleModal open={openTopClientsModal} onClose={handleCloseTopClients}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de top clientes</h2>
+        <form onSubmit={handleTopClientsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={topClientsParams.fechaInicio}
+              onChange={handleTopClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={topClientsParams.fechaFin}
+              onChange={handleTopClientsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Cantidad de clientes (top)</span>
+            <input
+              type="number"
+              name="limit"
+              value={topClientsParams.limit}
+              onChange={handleTopClientsParamsChange}
+              min="1"
+              max="100"
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseTopClients} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openTopProductsModal} onClose={handleCloseTopProducts}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de productos más vendidos</h2>
+        <form onSubmit={handleTopProductsReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={topProductsParams.fechaInicio}
+              onChange={handleTopProductsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={topProductsParams.fechaFin}
+              onChange={handleTopProductsParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Cantidad de productos (top)</span>
+            <input
+              type="number"
+              name="limit"
+              value={topProductsParams.limit}
+              onChange={handleTopProductsParamsChange}
+              min="1"
+              max="100"
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseTopProducts} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openSalesByHourModal} onClose={handleCloseSalesByHour}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas por horario</h2>
+        <form onSubmit={handleSalesByHourReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha inicio</span>
+            <input
+              type="date"
+              name="fechaInicio"
+              value={salesByHourParams.fechaInicio}
+              onChange={handleSalesByHourParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha fin</span>
+            <input
+              type="date"
+              name="fechaFin"
+              value={salesByHourParams.fechaFin}
+              onChange={handleSalesByHourParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button type="button" onClick={handleCloseSalesByHour} className="px-3 py-1 rounded bg-gray-200">
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
       <SimpleModal open={openDailySalesModal} onClose={handleCloseDailySales}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de ventas diarias</h2>
         <form onSubmit={handleDailySalesReport} className="grid gap-4">
@@ -2900,6 +3398,68 @@ export function ReportsPage() {
         </form>
       </SimpleModal>
 
+      <SimpleModal open={openNoVisitDaysModal} onClose={handleCloseNoVisitDays}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de clientes que no han venido en X días</h2>
+        <form onSubmit={handleNoVisitDaysReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha de corte</span>
+            <input
+              type="date"
+              name="asOfDate"
+              value={noVisitDaysParams.asOfDate}
+              onChange={handleNoVisitDaysParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Días sin asistir (X)</span>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              name="inactivityDays"
+              value={noVisitDaysParams.inactivityDays}
+              onChange={handleNoVisitDaysParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={noVisitDaysParams.search}
+              onChange={handleNoVisitDaysParamsChange}
+              placeholder="Código, nombre, teléfono o correo"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyActiveClients"
+              checked={noVisitDaysParams.onlyActiveClients}
+              onChange={handleNoVisitDaysParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes activos</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseNoVisitDays}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
       <SimpleModal open={openActiveMembershipsModal} onClose={handleCloseActiveMemberships}>
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías vigentes</h2>
         <form onSubmit={handleActiveMembershipsReport} className="grid gap-4">
@@ -3112,6 +3672,99 @@ export function ReportsPage() {
             <button
               type="button"
               onClick={handleCloseUpcomingRenewals}
+              className="px-3 py-1 rounded bg-gray-200"
+            >
+              Cancelar
+            </button>
+            <button type="submit" className="px-3 py-1 rounded bg-emerald-600 text-white">
+              Ver reporte
+            </button>
+          </div>
+        </form>
+      </SimpleModal>
+
+      <SimpleModal open={openMembershipsExpiringWindowModal} onClose={handleCloseMembershipsExpiringWindow}>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías por vencer (3-5 días)</h2>
+        <form onSubmit={handleMembershipsExpiringWindowReport} className="grid gap-4">
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Fecha de corte</span>
+            <input
+              type="date"
+              name="asOfDate"
+              value={membershipsExpiringWindowParams.asOfDate}
+              onChange={handleMembershipsExpiringWindowParamsChange}
+              required
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="grid gap-1">
+              <span className="text-sm font-semibold">Días mínimo</span>
+              <input
+                type="number"
+                min="0"
+                max="90"
+                name="minDays"
+                value={membershipsExpiringWindowParams.minDays}
+                onChange={handleMembershipsExpiringWindowParamsChange}
+                required
+                className="border rounded px-2 py-1"
+              />
+            </label>
+            <label className="grid gap-1">
+              <span className="text-sm font-semibold">Días máximo</span>
+              <input
+                type="number"
+                min="0"
+                max="90"
+                name="maxDays"
+                value={membershipsExpiringWindowParams.maxDays}
+                onChange={handleMembershipsExpiringWindowParamsChange}
+                required
+                className="border rounded px-2 py-1"
+              />
+            </label>
+          </div>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Plan (opcional)</span>
+            <select
+              name="planId"
+              value={membershipsExpiringWindowParams.planId}
+              onChange={handleMembershipsExpiringWindowParamsChange}
+              className="border rounded px-2 py-1"
+            >
+              <option value="">Todos los planes</option>
+              {membershipPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="text-sm font-semibold">Búsqueda (opcional)</span>
+            <input
+              type="text"
+              name="search"
+              value={membershipsExpiringWindowParams.search}
+              onChange={handleMembershipsExpiringWindowParamsChange}
+              placeholder="Código, nombre o teléfono"
+              className="border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="onlyActiveClients"
+              checked={membershipsExpiringWindowParams.onlyActiveClients}
+              onChange={handleMembershipsExpiringWindowParamsChange}
+            />
+            <span className="text-sm font-semibold">Solo clientes activos</span>
+          </label>
+          <div className="flex gap-2 justify-end mt-2">
+            <button
+              type="button"
+              onClick={handleCloseMembershipsExpiringWindow}
               className="px-3 py-1 rounded bg-gray-200"
             >
               Cancelar
@@ -3531,22 +4184,40 @@ export function ReportsPage() {
         <h2 className="text-lg font-bold mb-4">Parámetros del reporte kardex de producto</h2>
         <form onSubmit={handleProductKardexReport} className="grid gap-4">
           <label className="grid gap-1">
-            <span className="text-sm font-semibold">Producto</span>
-            <select
-              name="productId"
-              value={productKardexParams.productId}
-              onChange={handleProductKardexParamsChange}
-              required
+            <span className="text-sm font-semibold">Producto (búsqueda)</span>
+            <input
+              type="text"
+              value={kardexProductSearch}
+              onChange={handleKardexProductSearchChange}
+              placeholder="Escribe nombre o SKU del producto"
               className="border rounded px-2 py-1"
-            >
-              <option value="">Seleccione un producto</option>
-              {inventoryProducts.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.sku} - {product.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
+          {(loadingKardexProductSuggestions || kardexProductSuggestions.length > 0) && (
+            <div className="rounded border border-brand-sand/70 bg-white max-h-40 overflow-auto">
+              {loadingKardexProductSuggestions && (
+                <p className="px-3 py-2 text-sm text-slate-500">Buscando productos...</p>
+              )}
+              {!loadingKardexProductSuggestions && kardexProductSuggestions.length === 0 && (
+                <p className="px-3 py-2 text-sm text-slate-500">Sin coincidencias</p>
+              )}
+              {!loadingKardexProductSuggestions &&
+                kardexProductSuggestions.map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handleSelectKardexProduct(product)}
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-brand-cream/60"
+                  >
+                    {product.name}
+                    {product.sku ? ` (${product.sku})` : ''}
+                  </button>
+                ))}
+            </div>
+          )}
+          {!!productKardexParams.productId && (
+            <p className="text-xs text-slate-600">Producto seleccionado ID: {productKardexParams.productId}</p>
+          )}
           <label className="grid gap-1">
             <span className="text-sm font-semibold">Fecha inicio</span>
             <input

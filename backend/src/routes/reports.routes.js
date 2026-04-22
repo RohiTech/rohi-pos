@@ -1999,6 +1999,264 @@ reportsRouter.get('/upcoming-renewals/pdf', async (req, res, next) => {
   }
 });
 
+reportsRouter.get('/clients-no-visit-days/pdf', async (req, res, next) => {
+  try {
+    const {
+      as_of_date: asOfDateRaw,
+      inactivity_days: inactivityDaysRaw,
+      search: searchRaw,
+      only_active_clients: onlyActiveClientsRaw
+    } = req.query;
+
+    const asOfDate = String(asOfDateRaw || new Date().toISOString().slice(0, 10)).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
+    }
+
+    const inactivityDays = inactivityDaysRaw ? Number.parseInt(String(inactivityDaysRaw), 10) : 30;
+    if (!Number.isInteger(inactivityDays) || inactivityDays < 1 || inactivityDays > 365) {
+      return res.status(400).json({ message: 'inactivity_days debe ser un entero entre 1 y 365' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const onlyActiveClients = String(onlyActiveClientsRaw || 'true').trim() !== 'false';
+
+    const sqlParams = [asOfDate, inactivityDays];
+    const whereConditions = [];
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      whereConditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length} OR COALESCE(c.email, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (onlyActiveClients) {
+      whereConditions.push('c.is_active = TRUE');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         c.id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.phone,
+         c.email,
+         c.is_active,
+         MAX(ch.checked_in_at) AS last_checkin_at,
+         COALESCE(($1::date - MAX(ch.checked_in_at::date)), $2 + 1)::int AS days_without_visit,
+         COUNT(ch.id)::int AS total_checkins
+       FROM clients c
+       LEFT JOIN checkins ch ON ch.client_id = c.id
+       ${whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : ''}
+       GROUP BY c.id, c.client_code, c.first_name, c.last_name, c.phone, c.email, c.is_active
+       HAVING COALESCE(($1::date - MAX(ch.checked_in_at::date)), $2 + 1)::int >= $2
+       ORDER BY days_without_visit DESC, c.last_name ASC, c.first_name ASC
+       LIMIT 1000`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const neverVisitedCount = rows.reduce((sum, row) => sum + (row.last_checkin_at ? 0 : 1), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="clientes_sin_visita_x_dias.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Clientes que No Han Venido en X Dias', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Fecha corte: ${asOfDate}  Dias sin venir >= ${inactivityDays}`, 20);
+    doc.text(`Clientes encontrados: ${rows.length} | Nunca han venido: ${neverVisitedCount}`, 20);
+    doc.text(`Filtro: ${search || 'Sin busqueda'} | Solo activos: ${onlyActiveClients ? 'Si' : 'No'}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay clientes que cumplan con el criterio seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 200, align: 'left' });
+      doc.text('Contacto', 220, headerY, { width: 120, align: 'left' });
+      doc.text('Ultima visita', 340, headerY, { width: 85, align: 'center' });
+      doc.text('Dias', 425, headerY, { width: 45, align: 'right' });
+      doc.text('Check-ins', 470, headerY, { width: 75, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        const contactLabel = row.phone || row.email || '--';
+        doc.text(clientLabel, 20, y, { width: 200, align: 'left' });
+        doc.text(contactLabel, 220, y, { width: 120, align: 'left' });
+        doc.text(
+          row.last_checkin_at ? new Date(row.last_checkin_at).toLocaleDateString('es-NI') : 'Nunca',
+          340,
+          y,
+          { width: 85, align: 'center' }
+        );
+        doc.text(String(Number(row.days_without_visit || 0)), 425, y, { width: 45, align: 'right' });
+        doc.text(String(Number(row.total_checkins || 0)), 470, y, { width: 75, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Clientes que No Han Venido en X Dias', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/memberships-expiring-window/pdf', async (req, res, next) => {
+  try {
+    const {
+      as_of_date: asOfDateRaw,
+      min_days: minDaysRaw,
+      max_days: maxDaysRaw,
+      plan_id: planIdRaw,
+      search: searchRaw,
+      only_active_clients: onlyActiveClientsRaw
+    } = req.query;
+
+    const asOfDate = String(asOfDateRaw || new Date().toISOString().slice(0, 10)).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) {
+      return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
+    }
+
+    const minDays = minDaysRaw ? Number.parseInt(String(minDaysRaw), 10) : 3;
+    const maxDays = maxDaysRaw ? Number.parseInt(String(maxDaysRaw), 10) : 5;
+    if (!Number.isInteger(minDays) || !Number.isInteger(maxDays) || minDays < 0 || maxDays > 90 || minDays > maxDays) {
+      return res.status(400).json({ message: 'min_days y max_days deben ser enteros validos (0-90) y min_days <= max_days' });
+    }
+
+    const planId = planIdRaw ? Number.parseInt(String(planIdRaw), 10) : null;
+    if (planIdRaw && (!Number.isInteger(planId) || planId <= 0)) {
+      return res.status(400).json({ message: 'plan_id debe ser un entero positivo' });
+    }
+
+    const search = String(searchRaw || '').trim();
+    const onlyActiveClients = String(onlyActiveClientsRaw || 'true').trim() !== 'false';
+
+    const sqlParams = [asOfDate, minDays, maxDays];
+    const conditions = [
+      "m.status IN ('active', 'pending')",
+      'm.end_date BETWEEN ($1::date + ($2 * INTERVAL \'1 day\')) AND ($1::date + ($3 * INTERVAL \'1 day\'))'
+    ];
+
+    if (planId) {
+      sqlParams.push(planId);
+      conditions.push(`m.plan_id = $${sqlParams.length}`);
+    }
+
+    if (search) {
+      sqlParams.push(`%${search}%`);
+      conditions.push(
+        `(c.client_code ILIKE $${sqlParams.length} OR c.first_name ILIKE $${sqlParams.length} OR c.last_name ILIKE $${sqlParams.length} OR COALESCE(c.phone, '') ILIKE $${sqlParams.length})`
+      );
+    }
+
+    if (onlyActiveClients) {
+      conditions.push('c.is_active = TRUE');
+    }
+
+    const { rows } = await query(
+      `SELECT
+         m.membership_number,
+         m.end_date,
+         m.status,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         GREATEST((m.price - m.discount - m.amount_paid), 0)::numeric(12,2) AS balance_due,
+         c.id AS client_id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         c.phone,
+         mp.name AS plan_name,
+         GREATEST((m.end_date - $1::date), 0)::int AS days_to_expire
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY m.end_date ASC, c.last_name ASC, c.first_name ASC`,
+      sqlParams
+    );
+
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+    const balanceCount = rows.reduce((sum, row) => sum + (Number(row.balance_due || 0) > 0 ? 1 : 0), 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias_por_vencer_3_5_dias.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Membresias por Vencer', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Fecha corte: ${asOfDate}  Ventana: ${minDays}-${maxDays} dias`, 20);
+    doc.text(`Membresias por vencer: ${rows.length} | Con saldo: ${balanceCount}`, 20);
+    doc.text(`Filtro: ${search || 'Sin busqueda'} | Solo clientes activos: ${onlyActiveClients ? 'Si' : 'No'}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay membresias por vencer en la ventana seleccionada.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 150, align: 'left' });
+      doc.text('Plan', 170, headerY, { width: 90, align: 'left' });
+      doc.text('Vence', 260, headerY, { width: 65, align: 'center' });
+      doc.text('Dias', 325, headerY, { width: 35, align: 'right' });
+      doc.text('Telefono', 360, headerY, { width: 85, align: 'left' });
+      doc.text('Saldo', 445, headerY, { width: 100, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        doc.text(clientLabel, 20, y, { width: 150, align: 'left' });
+        doc.text(row.plan_name || '--', 170, y, { width: 90, align: 'left' });
+        doc.text(new Date(row.end_date).toLocaleDateString('es-NI'), 260, y, { width: 65, align: 'center' });
+        doc.text(String(Number(row.days_to_expire || 0)), 325, y, { width: 35, align: 'right' });
+        doc.text(row.phone || '--', 360, y, { width: 85, align: 'left' });
+        doc.text(`C$${Number(row.balance_due || 0).toFixed(2)}`, 445, y, { width: 100, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Membresias por Vencer', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 reportsRouter.get('/recurring-income/pdf', async (req, res, next) => {
   try {
     const {
@@ -4631,6 +4889,311 @@ reportsRouter.get('/sales-vs-income/pdf', async (req, res, next) => {
       doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
       doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
       doc.fontSize(9).text('Reporte de Ventas vs Ingresos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/top-clients/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, limit: limitRaw } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const limit = limitRaw ? Number.parseInt(String(limitRaw), 10) : 10;
+    if (!Number.isInteger(limit) || limit <= 0 || limit > 100) {
+      return res.status(400).json({ message: 'limit debe ser un entero entre 1 y 100' });
+    }
+
+    const { rows } = await query(
+      `WITH sales_source AS (
+         SELECT
+           s.client_id,
+           s.sold_at::date AS operation_date,
+           COALESCE(s.total, 0)::numeric(12,2) AS amount
+         FROM sales s
+         WHERE s.status = 'completed'
+           AND s.client_id IS NOT NULL
+           AND s.sold_at::date BETWEEN $1::date AND $2::date
+       ),
+       membership_source AS (
+         SELECT
+           m.client_id,
+           m.created_at::date AS operation_date,
+           COALESCE(m.amount_paid, 0)::numeric(12,2) AS amount
+         FROM memberships m
+         WHERE m.client_id IS NOT NULL
+           AND m.amount_paid > 0
+           AND m.created_at::date BETWEEN $1::date AND $2::date
+       ),
+       all_operations AS (
+         SELECT * FROM sales_source
+         UNION ALL
+         SELECT * FROM membership_source
+       )
+       SELECT
+         c.id AS client_id,
+         c.client_code,
+         c.first_name,
+         c.last_name,
+         COUNT(*)::int AS operation_count,
+         COUNT(DISTINCT ao.operation_date)::int AS active_days,
+         COALESCE(SUM(ao.amount), 0)::numeric(12,2) AS total_paid
+       FROM all_operations ao
+       INNER JOIN clients c ON c.id = ao.client_id
+       GROUP BY c.id, c.client_code, c.first_name, c.last_name
+       ORDER BY total_paid DESC, operation_count DESC, c.last_name ASC
+       LIMIT $3`,
+      [startDate, endDate, limit]
+    );
+
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.total_paid || 0), 0);
+    const totalOperations = rows.reduce((sum, row) => sum + Number(row.operation_count || 0), 0);
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="top_clientes.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Top Clientes', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Top: ${limit} clientes | Monto total del top: C$${totalAmount.toFixed(2)} | Frecuencia total: ${totalOperations}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay operaciones con cliente en el rango seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Cliente', 20, headerY, { width: 220, align: 'left' });
+      doc.text('Compras', 240, headerY, { width: 70, align: 'right' });
+      doc.text('Dias activos', 310, headerY, { width: 80, align: 'right' });
+      doc.text('Pagado', 390, headerY, { width: 160, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const clientLabel = `${row.client_code || `#${row.client_id}`} - ${`${row.first_name || ''} ${row.last_name || ''}`.trim()}`;
+        doc.text(clientLabel, 20, y, { width: 220, align: 'left' });
+        doc.text(String(Number(row.operation_count || 0)), 240, y, { width: 70, align: 'right' });
+        doc.text(String(Number(row.active_days || 0)), 310, y, { width: 80, align: 'right' });
+        doc.text(`C$${Number(row.total_paid || 0).toFixed(2)}`, 390, y, { width: 160, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Top Clientes', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/top-products/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin, limit: limitRaw } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const limit = limitRaw ? Number.parseInt(String(limitRaw), 10) : 10;
+    if (!Number.isInteger(limit) || limit <= 0 || limit > 100) {
+      return res.status(400).json({ message: 'limit debe ser un entero entre 1 y 100' });
+    }
+
+    const { rows } = await query(
+      `SELECT
+         p.id,
+         p.name AS product_name,
+         p.sku,
+         COUNT(DISTINCT s.id)::int AS tickets_count,
+         COALESCE(SUM(si.quantity), 0)::numeric(12,2) AS units_sold,
+         COALESCE(SUM(si.line_total), 0)::numeric(12,2) AS sales_amount
+       FROM sale_items si
+       INNER JOIN sales s ON s.id = si.sale_id
+       INNER JOIN products p ON p.id = si.product_id
+       WHERE s.status = 'completed'
+         AND s.sold_at::date BETWEEN $1::date AND $2::date
+       GROUP BY p.id, p.name, p.sku
+       ORDER BY units_sold DESC, sales_amount DESC, p.name ASC
+       LIMIT $3`,
+      [startDate, endDate, limit]
+    );
+
+    const totalUnits = rows.reduce((sum, row) => sum + Number(row.units_sold || 0), 0);
+    const totalSales = rows.reduce((sum, row) => sum + Number(row.sales_amount || 0), 0);
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="productos_mas_vendidos.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Productos Mas Vendidos', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Top: ${limit} productos | Unidades vendidas del top: ${totalUnits.toFixed(2)} | Venta del top: C$${totalSales.toFixed(2)}`, 20);
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay ventas de productos en el rango seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(9);
+      doc.text('Producto', 20, headerY, { width: 240, align: 'left' });
+      doc.text('Tickets', 260, headerY, { width: 60, align: 'right' });
+      doc.text('Unidades', 320, headerY, { width: 80, align: 'right' });
+      doc.text('Monto', 400, headerY, { width: 150, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(9);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const productLabel = row.sku ? `${row.product_name} (${row.sku})` : row.product_name;
+        doc.text(productLabel, 20, y, { width: 240, align: 'left' });
+        doc.text(String(Number(row.tickets_count || 0)), 260, y, { width: 60, align: 'right' });
+        doc.text(Number(row.units_sold || 0).toFixed(2), 320, y, { width: 80, align: 'right' });
+        doc.text(`C$${Number(row.sales_amount || 0).toFixed(2)}`, 400, y, { width: 150, align: 'right' });
+        doc.moveDown(0.7);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Productos Mas Vendidos', 1, bottom, { align: 'center' });
+      doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
+      doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/sales-by-hour/pdf', async (req, res, next) => {
+  try {
+    const { fechaInicio, fechaFin } = req.query;
+
+    if (!fechaInicio || !fechaFin) {
+      return res.status(400).json({ message: 'Debe proporcionar fechaInicio y fechaFin' });
+    }
+
+    const startDate = String(fechaInicio).trim();
+    const endDate = String(fechaFin).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({ message: 'fechaInicio y fechaFin deben tener formato YYYY-MM-DD' });
+    }
+
+    const { rows } = await query(
+      `SELECT
+         EXTRACT(HOUR FROM s.sold_at)::int AS sale_hour,
+         COUNT(*)::int AS sales_count,
+         COALESCE(SUM(s.total), 0)::numeric(12,2) AS sales_amount,
+         COALESCE(AVG(s.total), 0)::numeric(12,2) AS avg_ticket
+       FROM sales s
+       WHERE s.status = 'completed'
+         AND s.sold_at::date BETWEEN $1::date AND $2::date
+       GROUP BY EXTRACT(HOUR FROM s.sold_at)
+       ORDER BY EXTRACT(HOUR FROM s.sold_at) ASC`,
+      [startDate, endDate]
+    );
+
+    const totalSales = rows.reduce((sum, row) => sum + Number(row.sales_amount || 0), 0);
+    const totalOperations = rows.reduce((sum, row) => sum + Number(row.sales_count || 0), 0);
+    const topHour = rows.reduce(
+      (best, row) => (Number(row.sales_amount || 0) > Number(best.sales_amount || 0) ? row : best),
+      rows[0] || { sale_hour: null, sales_amount: 0 }
+    );
+    const usuario = req.user?.username || req.user?.email || 'Desconocido';
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ventas_por_horario.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Reporte de Ventas por Horario', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12).text(`Desde: ${startDate}  Hasta: ${endDate}`, 20);
+    doc.text(`Operaciones: ${totalOperations} | Monto total: C$${totalSales.toFixed(2)}`, 20);
+    if (rows.length) {
+      doc.text(
+        `Hora pico de ingresos: ${String(Number(topHour.sale_hour || 0)).padStart(2, '0')}:00 (C$${Number(topHour.sales_amount || 0).toFixed(2)})`,
+        20
+      );
+    }
+    doc.moveDown();
+
+    if (!rows.length) {
+      doc.fontSize(11).text('No hay ventas en el rango seleccionado.');
+    } else {
+      const headerY = doc.y;
+      doc.font('Helvetica-Bold').fontSize(10);
+      doc.text('Horario', 20, headerY, { width: 120, align: 'left' });
+      doc.text('Ventas', 140, headerY, { width: 120, align: 'right' });
+      doc.text('Monto', 260, headerY, { width: 140, align: 'right' });
+      doc.text('Ticket promedio', 400, headerY, { width: 150, align: 'right' });
+      doc.moveDown(1);
+
+      doc.font('Helvetica').fontSize(10);
+      rows.forEach((row) => {
+        const y = doc.y;
+        const hour = String(Number(row.sale_hour || 0)).padStart(2, '0');
+        doc.text(`${hour}:00 - ${hour}:59`, 20, y, { width: 120, align: 'left' });
+        doc.text(String(Number(row.sales_count || 0)), 140, y, { width: 120, align: 'right' });
+        doc.text(`C$${Number(row.sales_amount || 0).toFixed(2)}`, 260, y, { width: 140, align: 'right' });
+        doc.text(`C$${Number(row.avg_ticket || 0).toFixed(2)}`, 400, y, { width: 150, align: 'right' });
+        doc.moveDown(0.8);
+      });
+    }
+
+    const pageCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      const bottom = doc.page.height - 90;
+      doc.fontSize(8).text(`Pagina: ${i + 1} de ${pageCount}`, 40, bottom, { align: 'left' });
+      doc.text(`Hora Ejec.: ${new Date().toLocaleTimeString('es-NI', { hour12: false })}`, 40, bottom + 12, { align: 'left' });
+      doc.text(`Fecha Ejec.: ${new Date().toLocaleDateString('es-NI')}`, 40, bottom + 24, { align: 'left' });
+      doc.fontSize(9).text('Reporte de Ventas por Horario', 1, bottom, { align: 'center' });
       doc.fontSize(8).text(`Usuario: ${usuario}`, 1, bottom + 12, { align: 'center' });
       doc.fontSize(9).text('Rohi-POS', doc.page.width - 120, bottom, { align: 'left' });
     }
