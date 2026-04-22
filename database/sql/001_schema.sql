@@ -68,13 +68,18 @@ CREATE TABLE membership_plans (
     name VARCHAR(100) NOT NULL UNIQUE,
     description TEXT,
     duration_days INTEGER NOT NULL,
+    base_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    tax_name VARCHAR(80) NOT NULL DEFAULT 'Exento',
+    tax_rate NUMERIC(5, 2) NOT NULL DEFAULT 0,
     price NUMERIC(12, 2) NOT NULL,
     allows_multiple_checkins_per_day BOOLEAN NOT NULL DEFAULT TRUE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT membership_plans_duration_chk CHECK (duration_days > 0),
-    CONSTRAINT membership_plans_price_chk CHECK (price >= 0)
+    CONSTRAINT membership_plans_price_chk CHECK (price >= 0),
+    CONSTRAINT membership_plans_base_price_chk CHECK (base_price >= 0),
+    CONSTRAINT membership_plans_tax_rate_chk CHECK (tax_rate >= 0 AND tax_rate <= 100)
 );
 
 CREATE TABLE memberships (

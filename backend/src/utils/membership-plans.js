@@ -63,6 +63,31 @@ function normalizeNonNegativeDecimal(value, fieldName, required = false) {
   return parsed;
 }
 
+function normalizeTaxName(value, required = false) {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    if (required) {
+      throw createHttpError(400, 'tax_name is required');
+    }
+    return null;
+  }
+
+  return normalized;
+}
+
+function normalizeTaxRate(value, required = false) {
+  const parsed = normalizeNonNegativeDecimal(value, 'tax_rate', required);
+  if (parsed === null) {
+    return null;
+  }
+
+  if (parsed > 100) {
+    throw createHttpError(400, 'tax_rate must be between 0 and 100');
+  }
+
+  return parsed;
+}
+
 export function validateCreateMembershipPlanPayload(payload) {
   const name = normalizeNullableString(payload.name);
 
@@ -74,6 +99,9 @@ export function validateCreateMembershipPlanPayload(payload) {
     name,
     description: normalizeNullableString(payload.description),
     duration_days: normalizePositiveInteger(payload.duration_days, 'duration_days', true),
+    base_price: normalizeNonNegativeDecimal(payload.base_price, 'base_price', true),
+    tax_name: normalizeTaxName(payload.tax_name, true),
+    tax_rate: normalizeTaxRate(payload.tax_rate, true),
     price: normalizeNonNegativeDecimal(payload.price, 'price', true),
     allows_multiple_checkins_per_day: normalizeBoolean(
       payload.allows_multiple_checkins_per_day,
@@ -103,6 +131,18 @@ export function validateUpdateMembershipPlanPayload(payload) {
 
   if ('price' in payload) {
     updates.price = normalizeNonNegativeDecimal(payload.price, 'price', true);
+  }
+
+  if ('base_price' in payload) {
+    updates.base_price = normalizeNonNegativeDecimal(payload.base_price, 'base_price', true);
+  }
+
+  if ('tax_name' in payload) {
+    updates.tax_name = normalizeTaxName(payload.tax_name, true);
+  }
+
+  if ('tax_rate' in payload) {
+    updates.tax_rate = normalizeTaxRate(payload.tax_rate, true);
   }
 
   if ('allows_multiple_checkins_per_day' in payload) {

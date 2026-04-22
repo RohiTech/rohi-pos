@@ -19,6 +19,9 @@ const basePlanSelect = `
     name,
     description,
     duration_days,
+    base_price,
+    tax_name,
+    tax_rate,
     price,
     allows_multiple_checkins_per_day,
     is_active,
@@ -54,7 +57,7 @@ membershipPlansRouter.get('/', async (request, response, next) => {
     if (search) {
       params.push(`%${search}%`);
       conditions.push(
-        `(name ILIKE $${params.length} OR COALESCE(description, '') ILIKE $${params.length} OR CAST(duration_days AS TEXT) ILIKE $${params.length} OR CAST(price AS TEXT) ILIKE $${params.length})`
+        `(name ILIKE $${params.length} OR COALESCE(description, '') ILIKE $${params.length} OR CAST(duration_days AS TEXT) ILIKE $${params.length} OR CAST(base_price AS TEXT) ILIKE $${params.length} OR CAST(price AS TEXT) ILIKE $${params.length} OR COALESCE(tax_name, '') ILIKE $${params.length} OR CAST(tax_rate AS TEXT) ILIKE $${params.length})`
       );
     }
 
@@ -122,16 +125,22 @@ membershipPlansRouter.post('/', async (request, response, next) => {
          name,
          description,
          duration_days,
+         base_price,
+         tax_name,
+         tax_rate,
          price,
          allows_multiple_checkins_per_day,
          is_active
        )
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, duration_days, price, is_active, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, name, duration_days, base_price, tax_name, tax_rate, price, is_active, created_at`,
       [
         payload.name,
         payload.description,
         payload.duration_days,
+        payload.base_price,
+        payload.tax_name,
+        payload.tax_rate,
         payload.price,
         payload.allows_multiple_checkins_per_day,
         payload.is_active
@@ -172,7 +181,7 @@ membershipPlansRouter.put('/:id', async (request, response, next) => {
       `UPDATE membership_plans
        SET ${setClauses.join(', ')}
        WHERE id = $${keys.length + 1}
-       RETURNING id, name, duration_days, price, is_active, updated_at`,
+       RETURNING id, name, duration_days, base_price, tax_name, tax_rate, price, is_active, updated_at`,
       [...values, planId]
     );
 

@@ -330,9 +330,28 @@ salesRouter.get('/summary', async (_request, response, next) => {
        ),
        memberships_income AS (
          SELECT
-           COALESCE(SUM(m.amount_paid), 0)::numeric(12,2) AS total_income,
-           COALESCE(SUM(m.amount_paid) FILTER (WHERE m.created_at::date = CURRENT_DATE), 0)::numeric(12,2) AS income_today
+           COALESCE(
+             SUM(
+               CASE
+                 WHEN COALESCE(mp.tax_rate, 0) > 0
+                   THEN COALESCE(m.amount_paid, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)
+                 ELSE COALESCE(m.amount_paid, 0)
+               END
+             ),
+             0
+           )::numeric(12,2) AS total_income,
+           COALESCE(
+             SUM(
+               CASE
+                 WHEN COALESCE(mp.tax_rate, 0) > 0
+                   THEN COALESCE(m.amount_paid, 0) / (1 + COALESCE(mp.tax_rate, 0) / 100.0)
+                 ELSE COALESCE(m.amount_paid, 0)
+               END
+             ) FILTER (WHERE m.created_at::date = CURRENT_DATE),
+             0
+           )::numeric(12,2) AS income_today
          FROM memberships m
+         LEFT JOIN membership_plans mp ON mp.id = m.plan_id
          WHERE COALESCE(m.amount_paid, 0) > 0
        )
        SELECT

@@ -7,12 +7,16 @@ import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
+import { useSettings } from '../context/SettingsContext';
 import * as XLSX from 'xlsx';
 
 const initialPlanForm = {
   name: '',
   description: '',
   duration_days: '',
+  base_price: '',
+  tax_name: 'Exento',
+  tax_rate: '0',
   price: '',
   is_active: true
 };
@@ -55,6 +59,7 @@ function calculateAmountPaid(priceValue, discountValue) {
 }
 
 export function MembershipsPage() {
+  const { settings } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState('membership-list');
@@ -91,6 +96,26 @@ export function MembershipsPage() {
   const [membershipExporting, setMembershipExporting] = useState(false);
   const [photoViewerSrc, setPhotoViewerSrc] = useState('');
   const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
+
+  const baseTaxOptions =
+    Array.isArray(settings?.tax_options) && settings.tax_options.length > 0
+      ? settings.tax_options
+      : [
+          { name: 'Exento', rate: 0 },
+          { name: 'IVA', rate: 15 }
+        ];
+
+  const selectedTaxValue = `${planForm.tax_name || 'Exento'}|${String(Number(planForm.tax_rate || 0))}`;
+  const configuredTaxOptions =
+    baseTaxOptions.some((option) => `${String(option?.name || '').trim()}|${Number(option?.rate || 0)}` === selectedTaxValue)
+      ? baseTaxOptions
+      : [
+          ...baseTaxOptions,
+          {
+            name: planForm.tax_name || 'Exento',
+            rate: Number(planForm.tax_rate || 0)
+          }
+        ];
 
   function openPhotoViewer(src, alt = 'Foto de cliente') {
     if (!src) {
@@ -250,8 +275,48 @@ export function MembershipsPage() {
     const { name, value, type, checked } = event.target;
     setPlanForm((current) => ({
       ...current,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === 'checkbox' ? checked : value,
+      price:
+        name === 'base_price' || name === 'tax_rate'
+          ? (() => {
+              const nextBasePrice = Number(name === 'base_price' ? value : current.base_price || 0);
+              const nextTaxRate = Number(name === 'tax_rate' ? value : current.tax_rate || 0);
+              const salePrice = nextBasePrice + nextBasePrice * (nextTaxRate / 100);
+              return Number.isFinite(salePrice) ? String(salePrice.toFixed(2)) : current.price;
+            })()
+          : current.price
     }));
+  }
+
+  function handlePlanTaxChange(event) {
+    const selectedValue = String(event.target.value || 'Exento|0');
+    const separatorIndex = selectedValue.lastIndexOf('|');
+
+    if (separatorIndex < 0) {
+      setPlanForm((current) => ({
+        ...current,
+        tax_name: 'Exento',
+        tax_rate: '0',
+        price: String(Number(current.base_price || 0).toFixed(2))
+      }));
+      return;
+    }
+
+    const taxName = selectedValue.slice(0, separatorIndex).trim() || 'Exento';
+    const taxRate = Number(selectedValue.slice(separatorIndex + 1));
+
+    setPlanForm((current) => {
+      const basePrice = Number(current.base_price || 0);
+      const safeRate = Number.isFinite(taxRate) ? taxRate : 0;
+      const salePrice = basePrice + basePrice * (safeRate / 100);
+
+      return {
+        ...current,
+        tax_name: taxName,
+        tax_rate: String(safeRate),
+        price: String(Number.isFinite(salePrice) ? salePrice.toFixed(2) : 0)
+      };
+    });
   }
 
   function handleMembershipChange(event) {
@@ -331,6 +396,9 @@ export function MembershipsPage() {
       name: plan.name || '',
       description: plan.description || '',
       duration_days: String(plan.duration_days || ''),
+      base_price: String(plan.base_price || ''),
+      tax_name: plan.tax_name || 'Exento',
+      tax_rate: String(plan.tax_rate || 0),
       price: String(plan.price || ''),
       is_active: Boolean(plan.is_active)
     });
@@ -362,6 +430,8 @@ export function MembershipsPage() {
       const payload = {
         ...planForm,
         duration_days: Number(planForm.duration_days),
+        base_price: Number(planForm.base_price),
+        tax_rate: Number(planForm.tax_rate),
         price: Number(planForm.price)
       };
 
@@ -567,8 +637,35 @@ export function MembershipsPage() {
                 <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="1" name="duration_days" onChange={handlePlanChange} required type="number" value={planForm.duration_days} />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-brand-forest">Precio</span>
-                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="price" onChange={handlePlanChange} required step="0.01" type="number" value={planForm.price} />
+                <span className="text-sm font-semibold text-brand-forest">Precio base</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" min="0" name="base_price" onChange={handlePlanChange} required step="0.01" type="number" value={planForm.base_price} />
+              </label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Impuesto</span>
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={handlePlanTaxChange}
+                  value={selectedTaxValue}
+                >
+                  {configuredTaxOptions.map((option) => {
+                    const optionValue = `${String(option?.name || '').trim()}|${Number(option?.rate || 0)}`;
+                    return (
+                      <option key={optionValue} value={optionValue}>
+                        {String(option?.name || 'Impuesto')} ({Number(option?.rate || 0)}%)
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Tasa impuesto (%)</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" max="100" min="0" name="tax_rate" onChange={handlePlanChange} required step="0.01" type="number" value={planForm.tax_rate} />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Precio de venta</span>
+                <input className="rounded-2xl border border-brand-sand bg-brand-cream/30 px-4 py-3" min="0" name="price" readOnly step="0.01" type="number" value={planForm.price} />
               </label>
             </div>
             <label className="flex items-center gap-3 text-sm font-semibold text-brand-forest">
@@ -759,6 +856,9 @@ export function MembershipsPage() {
                     </span>
                   </div>
                   <p className="mt-4 text-xl font-bold text-brand-clay">{formatCurrency(plan.price)}</p>
+                  <p className="mt-1 text-sm text-brand-forest/70">
+                    Base {formatCurrency(plan.base_price || 0)} · Imp. {plan.tax_name || 'Exento'} ({Number(plan.tax_rate || 0)}%)
+                  </p>
                   <div className="mt-4 flex gap-2">
                     <button className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest" onClick={() => startEditPlan(plan)} type="button">
                       Editar
