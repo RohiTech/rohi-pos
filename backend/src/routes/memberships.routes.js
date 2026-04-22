@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import PDFDocument from 'pdfkit';
 import { query } from '../config/db.js';
 import {
   addDaysToDate,
@@ -355,6 +356,130 @@ membershipsRouter.put('/:id', async (request, response, next) => {
       return;
     }
 
+    next(error);
+  }
+});
+
+membershipsRouter.get('/:id/receipt/pdf', async (request, response, next) => {
+  try {
+    const membershipId = parsePositiveInteger(request.params.id);
+
+    if (!membershipId) {
+      throw createHttpError(400, 'Membership id must be a positive integer');
+    }
+
+    const receiptResult = await query(
+      `SELECT
+         m.id,
+         m.membership_number,
+         m.start_date,
+         m.end_date,
+         m.price,
+         m.discount,
+         m.amount_paid,
+         m.notes,
+         m.created_at,
+         c.client_code,
+         c.first_name AS client_first_name,
+         c.last_name AS client_last_name,
+         mp.name AS plan_name,
+         mp.tax_name,
+         mp.tax_rate,
+         u.username AS sold_by_username
+       FROM memberships m
+       INNER JOIN clients c ON c.id = m.client_id
+       INNER JOIN membership_plans mp ON mp.id = m.plan_id
+       LEFT JOIN users u ON u.id = m.sold_by_user_id
+       WHERE m.id = $1
+       LIMIT 1`,
+      [membershipId]
+    );
+
+    if (receiptResult.rowCount === 0) {
+      throw createHttpError(404, 'Membership not found');
+    }
+
+    const membership = receiptResult.rows[0];
+    const total = Number(membership.price || 0) - Number(membership.discount || 0);
+    const taxRate = Number(membership.tax_rate || 0);
+    const subtotal = taxRate > 0 ? total / (1 + taxRate / 100) : total;
+    const taxAmount = Math.max(total - subtotal, 0);
+
+    const settingsResult = await query(
+      `SELECT setting_key, setting_value
+       FROM system_settings
+       WHERE setting_key = ANY($1)
+       ORDER BY setting_key ASC`,
+      [['company_name']]
+    );
+
+    const settings = Object.fromEntries(settingsResult.rows.map((row) => [row.setting_key, row.setting_value]));
+    const companyName = String(settings.company_name || '').trim() || 'RohiPOS';
+
+    const doc = new PDFDocument({ margin: 34, size: [226.77, 470] });
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `inline; filename="recibo_membresia_${membership.membership_number || membership.id}.pdf"`
+    );
+    doc.pipe(response);
+
+    doc.font('Helvetica-Bold').fontSize(13).text(companyName, { align: 'center' });
+    doc.font('Helvetica').fontSize(9).text('Recibo de membresia', { align: 'center' });
+    doc.moveDown(0.7);
+
+    doc.fontSize(8);
+    doc.text(`Membresia: ${membership.membership_number || membership.id}`);
+    doc.text(`Fecha: ${new Date(membership.created_at).toLocaleString('es-NI')}`);
+    doc.text(`Cliente: ${membership.client_code} - ${membership.client_first_name} ${membership.client_last_name}`);
+    doc.text(`Plan: ${membership.plan_name}`);
+    doc.text(`Inicio: ${membership.start_date ? new Date(membership.start_date).toLocaleDateString('es-NI') : '--'}`);
+    doc.text(`Fin: ${membership.end_date ? new Date(membership.end_date).toLocaleDateString('es-NI') : '--'}`);
+    doc.text(`Cajero: ${membership.sold_by_username || '--'}`);
+    doc.moveDown(0.5);
+
+    doc.moveTo(34, doc.y).lineTo(192, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(0.6);
+
+    doc.font('Helvetica').fontSize(8.5);
+    doc.text('Subtotal', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${subtotal.toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+    doc.moveDown(0.35);
+    doc.text('Impuesto', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${taxAmount.toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+    doc.moveDown(0.35);
+    doc.text('Descuento', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${Number(membership.discount || 0).toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+    doc.moveDown(0.35);
+    doc.text('Pagado', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${Number(membership.amount_paid || 0).toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+
+    const balance = Math.max(total - Number(membership.amount_paid || 0), 0);
+    doc.moveDown(0.35);
+    doc.text('Saldo', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${balance.toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+
+    if (membership.notes) {
+      doc.moveDown(0.6);
+      doc.text(`Notas: ${membership.notes}`, 34, doc.y, { width: 158, align: 'left' });
+    }
+
+    doc.moveDown(0.8);
+    doc.moveTo(34, doc.y).lineTo(192, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(0.6);
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', 34, doc.y, { width: 110, align: 'left', lineBreak: false });
+    doc.text(`C$${total.toFixed(2)}`, 136, doc.y, { width: 56, align: 'right' });
+
+    doc.moveDown(1);
+    doc.font('Helvetica').fontSize(8).text('Gracias por su compra', 34, doc.y, {
+      width: 158,
+      align: 'center'
+    });
+
+    doc.end();
+  } catch (error) {
     next(error);
   }
 });

@@ -5,7 +5,7 @@ import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
-import { apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
+import { apiGet, apiPost, apiPut, authToken, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 import { useSettings } from '../context/SettingsContext';
 import * as XLSX from 'xlsx';
@@ -35,6 +35,7 @@ const initialMembershipForm = {
 
 const PLAN_PAGE_SIZE = 6;
 const MEMBERSHIP_PAGE_SIZE = 6;
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 function formatDateInput(date) {
   const year = date.getFullYear();
@@ -93,6 +94,7 @@ export function MembershipsPage() {
   const [error, setError] = useState('');
   const [planSaving, setPlanSaving] = useState(false);
   const [membershipSaving, setMembershipSaving] = useState(false);
+  const [reprintingMembershipId, setReprintingMembershipId] = useState(null);
   const [membershipExporting, setMembershipExporting] = useState(false);
   const [photoViewerSrc, setPhotoViewerSrc] = useState('');
   const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
@@ -129,6 +131,46 @@ export function MembershipsPage() {
   function closePhotoViewer() {
     setPhotoViewerSrc('');
     setPhotoViewerAlt('Foto de cliente');
+  }
+
+  async function openMembershipReceipt(membershipId) {
+    if (!membershipId) {
+      throw new Error('No se pudo obtener el identificador de la membresia para imprimir el recibo.');
+    }
+
+    const response = await fetch(`${API_URL}/memberships/${membershipId}/receipt/pdf`, {
+      headers: authToken
+        ? {
+            Authorization: `Bearer ${authToken}`
+          }
+        : {}
+    });
+
+    if (!response.ok) {
+      throw new Error('No se pudo abrir el recibo de la membresia.');
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+  }
+
+  async function handleReprintMembershipReceipt(membershipId) {
+    if (!membershipId) {
+      return;
+    }
+
+    setError('');
+
+    try {
+      setReprintingMembershipId(membershipId);
+      await openMembershipReceipt(membershipId);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible reimprimir el recibo de la membresia');
+    } finally {
+      setReprintingMembershipId(null);
+    }
   }
 
   async function loadFormOptions() {
@@ -499,7 +541,7 @@ export function MembershipsPage() {
           }));
         }
 
-        await apiPost('/memberships', {
+        const createResponse = await apiPost('/memberships', {
           client_id: resolvedClientId,
           plan_id: Number(membershipForm.plan_id),
           membership_number: membershipForm.membership_number || null,
@@ -510,6 +552,8 @@ export function MembershipsPage() {
           amount_paid: membershipForm.amount_paid === '' ? 0 : Number(membershipForm.amount_paid),
           notes: membershipForm.notes || null
         });
+
+        await openMembershipReceipt(createResponse?.data?.id);
       }
 
       setEditingMembershipId(null);
@@ -975,6 +1019,14 @@ export function MembershipsPage() {
                     </button>
                     <button className="rounded-xl bg-brand-cream px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-clay" onClick={() => toggleMembershipState(membership)} type="button">
                       {membership.status === 'cancelled' ? 'Reactivar' : 'Cancelar'}
+                    </button>
+                    <button
+                      className="rounded-xl bg-brand-forest px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:opacity-60"
+                      disabled={reprintingMembershipId === membership.id}
+                      onClick={() => handleReprintMembershipReceipt(membership.id)}
+                      type="button"
+                    >
+                      {reprintingMembershipId === membership.id ? 'Imprimiendo...' : 'Reimprimir recibo'}
                     </button>
                   </div>
                 </div>
