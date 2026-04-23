@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import SimpleModal from '../components/SimpleModal';
+import { useSettings } from '../context/SettingsContext';
 import { apiGet, authToken, buildQueryString } from '../lib/api';
 
 const reportModules = [
@@ -34,7 +35,7 @@ const reportModules = [
       'Membresías vigentes',
       'Membresías por plan',
       'Renovaciones próximas',
-      'Membresías por vencer (3-5 días)',
+      'Membresías por vencer (según días de aviso)',
       'Ingresos recurrentes',
       'Membresías vencidas',
       'Tasa de renovación',
@@ -104,8 +105,11 @@ function getModuleIcon(moduleTitle) {
 }
 
 export function ReportsPage() {
+  const { settings } = useSettings();
   const todayDate = getTodayDateString();
   const firstDayOfCurrentMonth = getFirstDayOfCurrentMonthDateString();
+  const parsedAlertDays = Number(settings?.membership_expiry_alert_days);
+  const alertDays = Number.isFinite(parsedAlertDays) ? Math.max(0, parsedAlertDays) : 7;
   const [expandedModule, setExpandedModule] = useState(reportModules[0]?.title ?? '');
 
   const [openDailySalesModal, setOpenDailySalesModal] = useState(false);
@@ -229,12 +233,20 @@ export function ReportsPage() {
   });
   const [membershipsExpiringWindowParams, setMembershipsExpiringWindowParams] = useState({
     asOfDate: todayDate,
-    minDays: '3',
-    maxDays: '5',
+    minDays: '0',
+    maxDays: '7',
     planId: '',
     search: '',
     onlyActiveClients: true
   });
+
+  useEffect(() => {
+    setMembershipsExpiringWindowParams((prev) => ({
+      ...prev,
+      minDays: '0',
+      maxDays: String(Math.max(0, alertDays))
+    }));
+  }, [alertDays]);
   const [recurringIncomeParams, setRecurringIncomeParams] = useState({
     month: getCurrentMonthString(),
     status: '',
@@ -1267,8 +1279,8 @@ export function ReportsPage() {
     e.preventDefault();
     const query = buildQueryString({
       as_of_date: membershipsExpiringWindowParams.asOfDate,
-      min_days: membershipsExpiringWindowParams.minDays,
-      max_days: membershipsExpiringWindowParams.maxDays,
+      min_days: 0,
+      max_days: Math.max(0, alertDays),
       plan_id: membershipsExpiringWindowParams.planId,
       search: membershipsExpiringWindowParams.search.trim(),
       only_active_clients: membershipsExpiringWindowParams.onlyActiveClients
@@ -1288,7 +1300,7 @@ export function ReportsPage() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'membresias_por_vencer_3_5_dias.pdf';
+        a.download = `membresias_por_vencer_${Math.max(0, alertDays)}_dias.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -2112,7 +2124,7 @@ export function ReportsPage() {
                     >
                       {report}
                     </button>
-                  ) : report === 'Membresías por vencer (3-5 días)' ? (
+                  ) : report === 'Membresías por vencer (según días de aviso)' ? (
                     <button
                       className="font-semibold text-brand-forest hover:underline"
                       onClick={handleOpenMembershipsExpiringWindow}
@@ -3555,7 +3567,7 @@ export function ReportsPage() {
       </SimpleModal>
 
       <SimpleModal open={openMembershipsExpiringWindowModal} onClose={handleCloseMembershipsExpiringWindow}>
-        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías por vencer (3-5 días)</h2>
+        <h2 className="text-lg font-bold mb-4">Parámetros del reporte de membresías por vencer (según días de aviso)</h2>
         <form onSubmit={handleMembershipsExpiringWindowReport} className="grid gap-4">
           <label className="grid gap-1">
             <span className="text-sm font-semibold">Fecha de corte</span>
@@ -3568,34 +3580,9 @@ export function ReportsPage() {
               className="border rounded px-2 py-1"
             />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="grid gap-1">
-              <span className="text-sm font-semibold">Días mínimo</span>
-              <input
-                type="number"
-                min="0"
-                max="90"
-                name="minDays"
-                value={membershipsExpiringWindowParams.minDays}
-                onChange={handleMembershipsExpiringWindowParamsChange}
-                required
-                className="border rounded px-2 py-1"
-              />
-            </label>
-            <label className="grid gap-1">
-              <span className="text-sm font-semibold">Días máximo</span>
-              <input
-                type="number"
-                min="0"
-                max="90"
-                name="maxDays"
-                value={membershipsExpiringWindowParams.maxDays}
-                onChange={handleMembershipsExpiringWindowParamsChange}
-                required
-                className="border rounded px-2 py-1"
-              />
-            </label>
-          </div>
+          <p className="rounded border border-brand-sand bg-brand-cream/30 px-3 py-2 text-sm text-brand-forest/80">
+            Ventana aplicada automaticamente: 0 a {Math.max(0, alertDays)} dias (Configuracion general).
+          </p>
           <label className="grid gap-1">
             <span className="text-sm font-semibold">Plan (opcional)</span>
             <select

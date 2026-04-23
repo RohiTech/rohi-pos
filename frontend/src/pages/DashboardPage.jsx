@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { MetricCard } from '../components/MetricCard';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
-import { useApi } from '../hooks/useApi';
+import { useSettings } from '../context/SettingsContext';
 import { apiGet } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
@@ -82,7 +82,7 @@ function buildRenewMembershipUrl(membership) {
   return `/memberships?${params.toString()}`;
 }
 
-function getMembershipSegment(membership) {
+function getMembershipSegment(membership, expiryAlertDays) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const endDate = membership.end_date ? new Date(`${String(membership.end_date).slice(0, 10)}T00:00:00`) : null;
@@ -99,7 +99,16 @@ function getMembershipSegment(membership) {
     return 'expired';
   }
 
-  if (daysUntilEnd !== null && daysUntilEnd >= 3 && daysUntilEnd <= 5) {
+  const normalizedExpiryAlertDays = Number.isFinite(expiryAlertDays)
+    ? Math.max(0, Number(expiryAlertDays))
+    : 7;
+
+  if (
+    membership.status !== 'cancelled' &&
+    daysUntilEnd !== null &&
+    daysUntilEnd >= 0 &&
+    daysUntilEnd <= normalizedExpiryAlertDays
+  ) {
     return 'expiring';
   }
 
@@ -480,8 +489,11 @@ function HourlyHeatmap({ rows = [], emptyLabel = 'Sin datos' }) {
 }
 
 export function DashboardPage() {
-  const { data: membershipsSummary } = useApi(() => apiGet('/memberships/summary'), []);
-  const { data: memberships } = useApi(() => apiGet('/memberships?limit=30'), []);
+  const { settings } = useSettings();
+  const [membershipsSummary, setMembershipsSummary] = useState(null);
+  const [memberships, setMemberships] = useState(null);
+  const [photoViewerSrc, setPhotoViewerSrc] = useState('');
+  const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
   const [salesSummary, setSalesSummary] = useState(null);
   const [attendanceSummary, setAttendanceSummary] = useState(null);
   const [attendanceDays, setAttendanceDays] = useState(7);
@@ -502,6 +514,45 @@ export function DashboardPage() {
     hourly_yesterday: [],
     hourly_historical_average: []
   });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadMembershipInsights() {
+      try {
+        const [summaryResponse, membershipsResponse] = await Promise.all([
+          apiGet('/memberships/summary'),
+          apiGet('/memberships?limit=30')
+        ]);
+
+        if (isMounted) {
+          setMembershipsSummary(summaryResponse || null);
+          setMemberships(membershipsResponse || null);
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setMembershipsSummary(null);
+          setMemberships(null);
+        }
+      }
+    }
+
+    function handleFocusRefresh() {
+      loadMembershipInsights();
+    }
+
+    loadMembershipInsights();
+    const intervalId = window.setInterval(loadMembershipInsights, 30000);
+    window.addEventListener('focus', handleFocusRefresh);
+    document.addEventListener('visibilitychange', handleFocusRefresh);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocusRefresh);
+      document.removeEventListener('visibilitychange', handleFocusRefresh);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -671,11 +722,18 @@ export function DashboardPage() {
   ];
 
   const recentMemberships = memberships?.data || [];
+  const parsedExpiryAlertDays = Number(
+    membershipsSummary?.data?.membership_expiry_alert_days ?? settings?.membership_expiry_alert_days
+  );
+  const expiryAlertDays = Number.isFinite(parsedExpiryAlertDays)
+    ? Math.max(0, parsedExpiryAlertDays)
+    : 7;
   const segmentedMemberships = {
-    expired: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expired'),
-    expiring: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expiring'),
-    active: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'active')
+    expired: recentMemberships.filter((membership) => getMembershipSegment(membership, expiryAlertDays) === 'expired'),
+    expiring: recentMemberships.filter((membership) => getMembershipSegment(membership, expiryAlertDays) === 'expiring'),
+    active: recentMemberships.filter((membership) => getMembershipSegment(membership, expiryAlertDays) === 'active')
   };
+  const expiringMembershipCount = segmentedMemberships.expiring.length;
 
   const membershipBlocks = [
     {
@@ -686,7 +744,7 @@ export function DashboardPage() {
     },
     {
       key: 'expiring',
-      title: 'Por vencer (3-5 dias)',
+      title: `Por vencer (${expiryAlertDays} dias)`,
       marker: 'bg-amber-500',
       data: segmentedMemberships.expiring
     },
@@ -739,6 +797,20 @@ export function DashboardPage() {
     };
   });
 
+  function openPhotoViewer(src, alt = 'Foto de cliente') {
+    if (!src) {
+      return;
+    }
+
+    setPhotoViewerSrc(src);
+    setPhotoViewerAlt(alt);
+  }
+
+  function closePhotoViewer() {
+    setPhotoViewerSrc('');
+    setPhotoViewerAlt('Foto de cliente');
+  }
+
   return (
     <div>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -772,8 +844,8 @@ export function DashboardPage() {
         />
         <MetricCard
           label="Membresias por vencer"
-          value={membershipsSummary?.data?.expiring_in_7_days ?? '--'}
-          hint="Proximos 7 dias"
+          value={expiringMembershipCount}
+          hint={`Proximos ${expiryAlertDays} dias`}
           accent="clay"
         />
       </section>
@@ -996,13 +1068,32 @@ export function DashboardPage() {
                             key={membership.id}
                             className="flex flex-col gap-3 rounded-2xl border border-brand-sand/60 px-4 py-4 md:flex-row md:items-center md:justify-between"
                           >
-                            <div>
-                              <p className="text-sm font-semibold text-brand-forest">
-                                {membership.client_first_name} {membership.client_last_name}
-                              </p>
-                              <p className="mt-1 text-sm text-brand-forest/70">
-                                {membership.plan_name} · vence {formatDate(membership.end_date)}
-                              </p>
+                            <div className="flex items-start gap-3">
+                              {membership.client_photo_url ? (
+                                <img
+                                  alt={`${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || 'Cliente'}
+                                  className="h-12 w-12 cursor-zoom-in rounded-full border border-brand-sand/70 object-cover"
+                                  onClick={() =>
+                                    openPhotoViewer(
+                                      membership.client_photo_url,
+                                      `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || 'Foto de cliente'
+                                    )
+                                  }
+                                  src={membership.client_photo_url}
+                                />
+                              ) : (
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full border border-brand-sand/70 bg-brand-cream/70 text-sm font-semibold uppercase text-brand-forest">
+                                  {`${membership.client_first_name?.[0] || ''}${membership.client_last_name?.[0] || ''}` || '--'}
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-sm font-semibold text-brand-forest">
+                                  {membership.client_first_name} {membership.client_last_name}
+                                </p>
+                                <p className="mt-1 text-sm text-brand-forest/70">
+                                  {membership.plan_name} · vence {formatDate(membership.end_date)}
+                                </p>
+                              </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 md:justify-end">
                               <p className="text-sm font-semibold text-brand-clay">
@@ -1089,6 +1180,29 @@ export function DashboardPage() {
           </div>
         </DataPanel>
       </section>
+
+      {photoViewerSrc ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+          onClick={closePhotoViewer}
+          role="presentation"
+        >
+          <div className="relative max-h-[90vh] w-full max-w-5xl" onClick={(event) => event.stopPropagation()} role="presentation">
+            <button
+              className="absolute right-3 top-3 z-10 rounded-full bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-[0.12em] text-white"
+              onClick={closePhotoViewer}
+              type="button"
+            >
+              Cerrar
+            </button>
+            <img
+              alt={photoViewerAlt}
+              className="max-h-[90vh] w-full rounded-2xl object-contain"
+              src={photoViewerSrc}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

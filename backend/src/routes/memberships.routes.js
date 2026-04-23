@@ -25,6 +25,7 @@ const baseMembershipSelect = `
     c.client_code,
     c.first_name AS client_first_name,
     c.last_name AS client_last_name,
+    c.photo_url AS client_photo_url,
     c.phone AS client_phone,
     m.plan_id,
     mp.name AS plan_name,
@@ -173,19 +174,35 @@ membershipsRouter.get('/summary', async (_request, response, next) => {
   try {
     await refreshMembershipStatusesIfNeeded();
 
+    const settingsResult = await query(
+      `SELECT setting_value
+       FROM system_settings
+       WHERE setting_key = 'membership_expiry_alert_days'
+       LIMIT 1`
+    );
+    const parsedAlertDays = Number.parseInt(settingsResult.rows[0]?.setting_value, 10);
+    const alertDays = Number.isInteger(parsedAlertDays) && parsedAlertDays >= 0 ? parsedAlertDays : 7;
+
     const result = await query(
       `SELECT
          COUNT(*)::int AS total_memberships,
          COUNT(*) FILTER (WHERE status = 'active')::int AS active_memberships,
          COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_memberships,
          COUNT(*) FILTER (WHERE status = 'expired')::int AS expired_memberships,
-         COUNT(*) FILTER (WHERE end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7)::int AS expiring_in_7_days
-       FROM memberships`
+         COUNT(*) FILTER (
+           WHERE status IN ('active', 'pending')
+             AND end_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + ($1::int * INTERVAL '1 day'))
+         )::int AS expiring_in_alert_days
+       FROM memberships`,
+      [alertDays]
     );
 
     response.json({
       ok: true,
-      data: result.rows[0]
+      data: {
+        ...result.rows[0],
+        membership_expiry_alert_days: alertDays
+      }
     });
   } catch (error) {
     next(error);

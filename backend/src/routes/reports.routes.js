@@ -2137,8 +2137,17 @@ reportsRouter.get('/memberships-expiring-window/pdf', async (req, res, next) => 
       return res.status(400).json({ message: 'as_of_date debe tener formato YYYY-MM-DD' });
     }
 
-    const minDays = minDaysRaw ? Number.parseInt(String(minDaysRaw), 10) : 3;
-    const maxDays = maxDaysRaw ? Number.parseInt(String(maxDaysRaw), 10) : 5;
+    const alertDaysResult = await query(
+      `SELECT setting_value
+       FROM system_settings
+       WHERE setting_key = 'membership_expiry_alert_days'
+       LIMIT 1`
+    );
+    const parsedAlertDays = Number.parseInt(alertDaysResult.rows[0]?.setting_value, 10);
+    const configuredAlertDays = Number.isInteger(parsedAlertDays) && parsedAlertDays >= 0 ? parsedAlertDays : 7;
+
+    const minDays = minDaysRaw ? Number.parseInt(String(minDaysRaw), 10) : 0;
+    const maxDays = maxDaysRaw ? Number.parseInt(String(maxDaysRaw), 10) : configuredAlertDays;
     if (!Number.isInteger(minDays) || !Number.isInteger(maxDays) || minDays < 0 || maxDays > 90 || minDays > maxDays) {
       return res.status(400).json({ message: 'min_days y max_days deben ser enteros validos (0-90) y min_days <= max_days' });
     }
