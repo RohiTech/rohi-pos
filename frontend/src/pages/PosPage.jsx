@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { Pagination } from '../components/Pagination';
@@ -212,6 +213,7 @@ export function PosPage() {
   const [exportingCashClosePdf, setExportingCashClosePdf] = useState(false);
   const [exportingCashCloseExcel, setExportingCashCloseExcel] = useState(false);
   const [productExporting, setProductExporting] = useState(false);
+  const [cashMovementExporting, setCashMovementExporting] = useState(false);
   const [movementExporting, setMovementExporting] = useState(false);
 
   const productOptionsQuery = useApi(() => apiGet('/products?limit=100'), [refreshKey]);
@@ -959,6 +961,94 @@ export function PosPage() {
     }
   }
 
+  async function handleExportProductsPdf() {
+    clearMessages();
+    setProductExporting(true);
+
+    try {
+      const exportProducts = await fetchAllProductsForExport();
+
+      if (!exportProducts.length) {
+        setError('No hay productos para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: 'a4'
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const columns = ['SKU', 'Nombre', 'Categoria', 'Codigo', 'Venta', 'Costo', 'Stock', 'Minimo', 'Unidad', 'Estado'];
+      const usableWidth = pageWidth - margin * 2;
+      const colWidth = usableWidth / columns.length;
+      let y = margin;
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Catalogo de productos', margin, y);
+        y += 24;
+        doc.setFontSize(9);
+        columns.forEach((column, index) => {
+          doc.text(column, margin + index * colWidth + 2, y);
+        });
+        y += 8;
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 14;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportProducts.forEach((product) => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = [
+          product.sku || '--',
+          product.name || '--',
+          product.category_name || 'Sin categoria',
+          product.barcode || '--',
+          formatCurrency(product.sale_price),
+          formatCurrency(product.cost_price),
+          String(Number(product.stock_quantity || 0)),
+          String(Number(product.minimum_stock || 0)),
+          product.unit_label || '--',
+          product.is_active ? 'Activo' : 'Inactivo'
+        ];
+
+        row.forEach((value, index) => {
+          const text = doc.splitTextToSize(String(value), colWidth - 6)[0] || '--';
+          doc.text(text, margin + index * colWidth + 2, y);
+        });
+
+        y += 18;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      doc.save(`catalogo_productos_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar productos en PDF');
+    } finally {
+      setProductExporting(false);
+    }
+  }
+
   async function fetchAllInventoryMovementsForExport() {
     if (!selectedProductId) {
       return [];
@@ -1055,6 +1145,159 @@ export function PosPage() {
       setError(requestError.message || 'No fue posible exportar historial de inventario');
     } finally {
       setMovementExporting(false);
+    }
+  }
+
+  async function fetchAllCashMovementsForExport() {
+    const trimmedSearch = cashMovementSearch.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+    const firstResponse = await apiGet(`/cash-movements${firstQuery}`);
+    const allMovements = [...(firstResponse.data || [])];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(`/cash-movements${pageQuery}`);
+      allMovements.push(...(pageResponse.data || []));
+    }
+
+    return allMovements;
+  }
+
+  async function handleExportCashMovementsExcel() {
+    clearMessages();
+    setCashMovementExporting(true);
+
+    try {
+      const exportMovements = await fetchAllCashMovementsForExport();
+
+      if (!exportMovements.length) {
+        setError('No hay movimientos de caja para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportMovements.map((movement) => ({
+        Tipo: cashMovementTypeLabel[movement.movement_type] || movement.movement_type,
+        Descripcion: movement.description || 'Sin descripcion',
+        Monto: formatCurrency(movement.amount),
+        Usuario: movement.username || 'Sistema',
+        Fecha: new Date(movement.created_at).toLocaleString('es-NI')
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 14 },
+        { wch: 40 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 24 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'MovimientosCaja');
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `historial_movimientos_caja_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar movimientos de caja');
+    } finally {
+      setCashMovementExporting(false);
+    }
+  }
+
+  async function handleExportCashMovementsPdf() {
+    clearMessages();
+    setCashMovementExporting(true);
+
+    try {
+      const exportMovements = await fetchAllCashMovementsForExport();
+
+      if (!exportMovements.length) {
+        setError('No hay movimientos de caja para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: 'a4'
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const columns = ['Tipo', 'Descripcion', 'Monto', 'Usuario', 'Fecha'];
+      const usableWidth = pageWidth - margin * 2;
+      const colWidth = usableWidth / columns.length;
+      let y = margin;
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Historial de movimientos de caja', margin, y);
+        y += 24;
+        doc.setFontSize(9);
+        columns.forEach((column, index) => {
+          doc.text(column, margin + index * colWidth + 2, y);
+        });
+        y += 8;
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 14;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportMovements.forEach((movement) => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = [
+          cashMovementTypeLabel[movement.movement_type] || movement.movement_type,
+          movement.description || 'Sin descripcion',
+          formatCurrency(movement.amount),
+          movement.username || 'Sistema',
+          new Date(movement.created_at).toLocaleString('es-NI')
+        ];
+
+        row.forEach((value, index) => {
+          const text = doc.splitTextToSize(String(value), colWidth - 6)[0] || '--';
+          doc.text(text, margin + index * colWidth + 2, y);
+        });
+
+        y += 18;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      doc.save(`historial_movimientos_caja_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar movimientos de caja en PDF');
+    } finally {
+      setCashMovementExporting(false);
     }
   }
 
@@ -2268,13 +2511,32 @@ export function PosPage() {
             title="Historial de movimientos"
             subtitle="Control de ingresos y egresos manuales registrados en caja."
           >
-            <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-center">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
               <input
-                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                className="min-w-[260px] flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
                 onChange={(event) => setCashMovementSearch(event.target.value)}
                 placeholder="Buscar por descripcion"
                 value={cashMovementSearch}
               />
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={cashMovementExporting || cashMovementsQuery.loading}
+                onClick={handleExportCashMovementsExcel}
+                type="button"
+              >
+                {cashMovementExporting ? 'Exportando...' : 'Exportar Excel'}
+              </button>
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-sm font-semibold text-brand-forest disabled:opacity-60"
+                disabled={cashMovementExporting || cashMovementsQuery.loading}
+                onClick={handleExportCashMovementsPdf}
+                type="button"
+              >
+                {cashMovementExporting ? 'Exportando...' : 'Exportar PDF'}
+              </button>
+            </div>
+
+            <div className="mb-4 flex flex-wrap items-center gap-3">
               <span className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                 Ingresos: {formatCurrency(cashMovementsSummary.total_income || 0)}
               </span>
@@ -2680,6 +2942,14 @@ export function PosPage() {
                 type="button"
               >
                 {productExporting ? 'Exportando...' : 'Exportar Excel'}
+              </button>
+              <button
+                className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                disabled={productExporting || productCatalogQuery.loading}
+                onClick={handleExportProductsPdf}
+                type="button"
+              >
+                {productExporting ? 'Exportando...' : 'Exportar PDF'}
               </button>
             </div>
 
