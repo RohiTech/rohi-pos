@@ -333,6 +333,12 @@ export function PosPage() {
   }, [cashMovementsQuery.data]);
 
   useEffect(() => {
+    if (cashMovementPage > cashMovementPagination.totalPages) {
+      setCashMovementPage(cashMovementPagination.totalPages);
+    }
+  }, [cashMovementPage, cashMovementPagination.totalPages]);
+
+  useEffect(() => {
     if (movementsQuery.data?.pagination) {
       setMovementPagination(movementsQuery.data.pagination);
     } else if (!selectedProductId) {
@@ -1485,6 +1491,7 @@ export function PosPage() {
       });
 
       setCashMovementForm(initialCashMovementForm);
+      setCashMovementPage(1);
       triggerRefresh('Movimiento de caja registrado correctamente.');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible registrar el movimiento de caja');
