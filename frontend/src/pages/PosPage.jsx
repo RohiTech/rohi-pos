@@ -3252,29 +3252,31 @@ export function PosPage() {
                 : 'Selecciona un producto para revisar sus movimientos.'
             }
           >
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center">
-              <select
-                className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:w-80"
-                onChange={(event) => {
-                  setSelectedProductId(event.target.value);
-                  setInventoryForm((current) => ({ ...current, product_id: event.target.value }));
-                }}
-                value={selectedProductId}
-              >
-                <option value="">Selecciona un producto</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.sku} - {product.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:flex-1"
-                onChange={(event) => setMovementSearch(event.target.value)}
-                placeholder="Buscar por tipo, referencia o nota"
-                value={movementSearch}
-              />
-              <div className="flex gap-2">
+            <div className="mb-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <select
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:w-80"
+                  onChange={(event) => {
+                    setSelectedProductId(event.target.value);
+                    setInventoryForm((current) => ({ ...current, product_id: event.target.value }));
+                  }}
+                  value={selectedProductId}
+                >
+                  <option value="">Selecciona un producto</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.sku} - {product.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 md:flex-1"
+                  onChange={(event) => setMovementSearch(event.target.value)}
+                  placeholder="Buscar por tipo, referencia o nota"
+                  value={movementSearch}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 md:justify-end">
                 <button
                   className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
                   disabled={movementPdfExporting || movementsQuery.loading || !selectedProductId}
