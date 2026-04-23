@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
@@ -96,6 +97,7 @@ export function MembershipsPage() {
   const [planSaving, setPlanSaving] = useState(false);
   const [membershipSaving, setMembershipSaving] = useState(false);
   const [reprintingMembershipId, setReprintingMembershipId] = useState(null);
+  const [planExporting, setPlanExporting] = useState(false);
   const [membershipExporting, setMembershipExporting] = useState(false);
   const [photoViewerSrc, setPhotoViewerSrc] = useState('');
   const [photoViewerAlt, setPhotoViewerAlt] = useState('Foto de cliente');
@@ -681,6 +683,256 @@ export function MembershipsPage() {
     }
   }
 
+  async function handleExportMembershipsPdf() {
+    setError('');
+    setMembershipExporting(true);
+
+    try {
+      const exportMemberships = await fetchAllMembershipsForExport();
+
+      if (!exportMemberships.length) {
+        setError('No hay membresias para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: 'a4'
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const columns = ['Cliente', 'Codigo', 'Plan', 'Numero', 'Inicio', 'Vence', 'Estado', 'Precio', 'Saldo'];
+      const usableWidth = pageWidth - margin * 2;
+      const colWidth = usableWidth / columns.length;
+      let y = margin;
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Listado de membresias', margin, y);
+        y += 24;
+        doc.setFontSize(9);
+        columns.forEach((column, index) => {
+          doc.text(column, margin + index * colWidth + 2, y);
+        });
+        y += 8;
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 14;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportMemberships.forEach((membership) => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = [
+          `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || '--',
+          membership.client_code || '--',
+          membership.plan_name || '--',
+          membership.membership_number || '--',
+          formatDate(membership.start_date),
+          formatDate(membership.end_date),
+          membership.status || '--',
+          formatCurrency(membership.price),
+          formatCurrency(membership.balance_due)
+        ];
+
+        row.forEach((value, index) => {
+          const text = doc.splitTextToSize(String(value), colWidth - 6)[0] || '--';
+          doc.text(text, margin + index * colWidth + 2, y);
+        });
+
+        y += 18;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      doc.save(`membresias_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar membresias en PDF');
+    } finally {
+      setMembershipExporting(false);
+    }
+  }
+
+  async function fetchAllPlansForExport() {
+    const trimmedSearch = planSearch.trim();
+    const firstQuery = buildQueryString({
+      search: trimmedSearch,
+      page: 1,
+      limit: 100
+    });
+    const firstResponse = await apiGet(`/membership-plans${firstQuery}`);
+    const allPlans = [...firstResponse.data];
+    const totalPages = firstResponse.pagination?.totalPages || 1;
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageQuery = buildQueryString({
+        search: trimmedSearch,
+        page,
+        limit: 100
+      });
+      const pageResponse = await apiGet(`/membership-plans${pageQuery}`);
+      allPlans.push(...pageResponse.data);
+    }
+
+    return allPlans;
+  }
+
+  async function handleExportPlansExcel() {
+    setError('');
+    setPlanExporting(true);
+
+    try {
+      const exportPlans = await fetchAllPlansForExport();
+
+      if (!exportPlans.length) {
+        setError('No hay planes para exportar con el filtro actual');
+        return;
+      }
+
+      const rows = exportPlans.map((plan) => ({
+        Nombre: plan.name || '--',
+        Descripcion: plan.description || '--',
+        Dias: plan.duration_days || 0,
+        'Precio base': formatCurrency(plan.base_price || 0),
+        Impuesto: plan.tax_name || 'Exento',
+        'Tasa impuesto (%)': Number(plan.tax_rate || 0),
+        'Precio venta': formatCurrency(plan.price || 0),
+        Estado: plan.is_active ? 'Activo' : 'Inactivo'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+        { wch: 24 },
+        { wch: 36 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 14 },
+        { wch: 12 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Planes');
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      XLSX.writeFile(workbook, `planes_${stamp}.xlsx`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar planes');
+    } finally {
+      setPlanExporting(false);
+    }
+  }
+
+  async function handleExportPlansPdf() {
+    setError('');
+    setPlanExporting(true);
+
+    try {
+      const exportPlans = await fetchAllPlansForExport();
+
+      if (!exportPlans.length) {
+        setError('No hay planes para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: 'a4'
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const columns = ['Nombre', 'Descripcion', 'Dias', 'Base', 'Impuesto', 'Tasa %', 'Venta', 'Estado'];
+      const usableWidth = pageWidth - margin * 2;
+      const colWidth = usableWidth / columns.length;
+      let y = margin;
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Listado de planes', margin, y);
+        y += 24;
+        doc.setFontSize(9);
+        columns.forEach((column, index) => {
+          doc.text(column, margin + index * colWidth + 2, y);
+        });
+        y += 8;
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 14;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportPlans.forEach((plan) => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = [
+          plan.name || '--',
+          plan.description || '--',
+          String(plan.duration_days || 0),
+          formatCurrency(plan.base_price || 0),
+          plan.tax_name || 'Exento',
+          String(Number(plan.tax_rate || 0)),
+          formatCurrency(plan.price || 0),
+          plan.is_active ? 'Activo' : 'Inactivo'
+        ];
+
+        row.forEach((value, index) => {
+          const text = doc.splitTextToSize(String(value), colWidth - 6)[0] || '--';
+          doc.text(text, margin + index * colWidth + 2, y);
+        });
+
+        y += 18;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      doc.save(`planes_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar planes en PDF');
+    } finally {
+      setPlanExporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -931,8 +1183,24 @@ export function MembershipsPage() {
 
       {activeView === 'plan-list' ? (
         <DataPanel title="Planes disponibles" subtitle="Catalogo base para las ventas de membresias.">
-          <div className="mb-4">
-            <input className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setPlanSearch(event.target.value)} placeholder="Buscar plan por nombre, descripcion o precio" value={planSearch} />
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <input className="min-w-72 flex-1 rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3" onChange={(event) => setPlanSearch(event.target.value)} placeholder="Buscar plan por nombre, descripcion o precio" value={planSearch} />
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={planExporting || plansLoading}
+              onClick={handleExportPlansExcel}
+              type="button"
+            >
+              {planExporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={planExporting || plansLoading}
+              onClick={handleExportPlansPdf}
+              type="button"
+            >
+              {planExporting ? 'Exportando...' : 'Exportar PDF'}
+            </button>
           </div>
           {plansLoading ? <p className="text-sm text-brand-forest/70">Cargando planes...</p> : null}
           {!plansLoading && !plans.length ? <EmptyState title="Sin resultados" description="No hay planes que coincidan con la busqueda actual." /> : null}
@@ -980,6 +1248,14 @@ export function MembershipsPage() {
               type="button"
             >
               {membershipExporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={membershipExporting || membershipsLoading}
+              onClick={handleExportMembershipsPdf}
+              type="button"
+            >
+              {membershipExporting ? 'Exportando...' : 'Exportar PDF'}
             </button>
           </div>
           {membershipsLoading ? <p className="text-sm text-brand-forest/70">Cargando membresias...</p> : null}
