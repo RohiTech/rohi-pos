@@ -385,6 +385,12 @@ export function PosPage() {
   }, [movementsQuery.data, selectedProductId]);
 
   useEffect(() => {
+    if (movementPage > movementPagination.totalPages) {
+      setMovementPage(movementPagination.totalPages);
+    }
+  }, [movementPage, movementPagination.totalPages]);
+
+  useEffect(() => {
     if (posProductsQuery.data?.pagination) {
       setPosPagination(posProductsQuery.data.pagination);
     }
@@ -909,6 +915,7 @@ export function PosPage() {
         ...initialInventoryForm,
         product_id: current.product_id || selectedProductId || ''
       }));
+      setMovementPage(1);
       triggerRefresh('Movimiento de inventario registrado.');
     } catch (requestError) {
       setError(requestError.message || 'No fue posible registrar el movimiento');
