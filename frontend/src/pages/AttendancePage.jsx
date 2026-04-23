@@ -576,6 +576,7 @@ export function AttendancePage() {
       notes.includes(normalizedDailyPaymentsSearch)
     );
   });
+  const pendingCheckinCount = dailyPayments.filter((payment) => !payment.used_for_checkin_today).length;
 
   function handleExportClientsExcel() {
     if (!clients.length) {
@@ -674,7 +675,7 @@ export function AttendancePage() {
       {message ? <p className="mb-4 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="mb-4 text-sm text-rose-600">{error}</p> : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <DataPanel title="Ingresos hoy" subtitle="Check-ins procesados hoy.">
           <p className="text-4xl font-bold text-brand-forest">{summary?.total_today ?? 0}</p>
         </DataPanel>
@@ -688,6 +689,9 @@ export function AttendancePage() {
           <p className="text-4xl font-bold text-brand-clay">
             {formatCurrency(summary?.daily_pass_income_today ?? 0)}
           </p>
+        </DataPanel>
+        <DataPanel title="Pendiente de Marcar" subtitle="Pagaron hoy pero aun no registran asistencia.">
+          <p className="text-4xl font-bold text-amber-600">{pendingCheckinCount}</p>
         </DataPanel>
       </section>
 

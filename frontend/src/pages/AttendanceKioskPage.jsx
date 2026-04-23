@@ -382,6 +382,24 @@ export function AttendanceKioskPage() {
     };
   }, [scannerEnabled, scannerElementId]);
 
+  useEffect(() => {
+    if (!unlockModalOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        closeUnlockModal();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [unlockModalOpen, unlockLoading]);
+
   const companyName = settings.company_name || 'RohiPOS';
   const kioskLogo = settings.kiosk_logo_data_url || settings.company_logo_data_url || null;
   const kioskBackground = settings.kiosk_background_data_url || null;

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { MetricCard } from '../components/MetricCard';
+import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { useApi } from '../hooks/useApi';
 import { apiGet } from '../lib/api';
@@ -13,6 +16,16 @@ const CHART_PADDING = { top: 18, right: 18, bottom: 44, left: 48 };
 const HEATMAP_WIDTH = 760;
 const HEATMAP_HEIGHT = 210;
 const HEATMAP_PADDING = { top: 28, right: 16, bottom: 34, left: 68 };
+const MEMBERSHIP_BLOCK_PAGE_SIZE = 5;
+
+function getExportStamp() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0')
+  ].join('');
+}
 
 function formatDailyLabel(value) {
   return new Intl.DateTimeFormat('es-NI', {
@@ -96,6 +109,90 @@ function getMembershipSegment(membership) {
   }
 
   return 'other';
+}
+
+function getMembershipExportRows(memberships = []) {
+  return memberships.map((membership) => ({
+    Cliente: `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim() || '--',
+    Codigo: membership.client_code || '--',
+    Plan: membership.plan_name || '--',
+    Vence: formatDate(membership.end_date),
+    Estado: membership.status || '--',
+    Saldo: formatCurrency(membership.balance_due || 0),
+    Telefono: membership.client_phone || '--'
+  }));
+}
+
+function exportMembershipsToExcel(memberships, sheetName, fileName) {
+  const rows = getMembershipExportRows(memberships);
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 22 },
+    { wch: 16 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 }
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  XLSX.writeFile(workbook, `${fileName}_${getExportStamp()}.xlsx`);
+}
+
+function exportMembershipsToPdf(memberships, title, fileName) {
+  const rows = getMembershipExportRows(memberships);
+  const columns = ['Cliente', 'Codigo', 'Plan', 'Vence', 'Estado', 'Saldo', 'Telefono'];
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'pt',
+    format: 'a4'
+  });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 32;
+  const rowHeight = 18;
+  const usableWidth = pageWidth - margin * 2;
+  const colWidth = usableWidth / columns.length;
+  let y = margin;
+
+  const drawHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(title, margin, y);
+    y += 24;
+    doc.setFontSize(9);
+    columns.forEach((column, index) => {
+      doc.text(column, margin + index * colWidth + 2, y);
+    });
+    y += 8;
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 14;
+  };
+
+  drawHeader();
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+
+  rows.forEach((row) => {
+    if (y > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+    }
+
+    columns.forEach((column, index) => {
+      const text = doc.splitTextToSize(String(row[column] ?? '--'), colWidth - 6)[0] || '--';
+      doc.text(text, margin + index * colWidth + 2, y);
+    });
+
+    y += rowHeight;
+  });
+
+  doc.save(`${fileName}_${getExportStamp()}.pdf`);
 }
 
 function buildMembershipWhatsAppUrl(membership, segment) {
@@ -388,6 +485,16 @@ export function DashboardPage() {
   const [salesSummary, setSalesSummary] = useState(null);
   const [attendanceSummary, setAttendanceSummary] = useState(null);
   const [attendanceDays, setAttendanceDays] = useState(7);
+  const [membershipSearch, setMembershipSearch] = useState({
+    expired: '',
+    expiring: '',
+    active: ''
+  });
+  const [membershipPages, setMembershipPages] = useState({
+    expired: 1,
+    expiring: 1,
+    active: 1
+  });
   const [attendanceTrends, setAttendanceTrends] = useState({
     daily: [],
     daily_previous: [],
@@ -565,9 +672,9 @@ export function DashboardPage() {
 
   const recentMemberships = memberships?.data || [];
   const segmentedMemberships = {
-    expired: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expired').slice(0, 6),
-    expiring: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expiring').slice(0, 6),
-    active: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'active').slice(0, 6)
+    expired: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expired'),
+    expiring: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'expiring'),
+    active: recentMemberships.filter((membership) => getMembershipSegment(membership) === 'active')
   };
 
   const membershipBlocks = [
@@ -589,7 +696,48 @@ export function DashboardPage() {
       marker: 'bg-emerald-500',
       data: segmentedMemberships.active
     }
-  ];
+  ].map((block) => {
+    const searchValue = String(membershipSearch[block.key] || '').trim().toLowerCase();
+    const filteredData = block.data.filter((membership) => {
+      if (!searchValue) {
+        return true;
+      }
+
+      const fullName = `${membership.client_first_name || ''} ${membership.client_last_name || ''}`.trim().toLowerCase();
+      const code = String(membership.client_code || '').toLowerCase();
+      const plan = String(membership.plan_name || '').toLowerCase();
+      const phone = String(membership.client_phone || '').toLowerCase();
+      const status = String(membership.status || '').toLowerCase();
+
+      return (
+        fullName.includes(searchValue) ||
+        code.includes(searchValue) ||
+        plan.includes(searchValue) ||
+        phone.includes(searchValue) ||
+        status.includes(searchValue)
+      );
+    });
+    const currentPage = membershipPages[block.key] || 1;
+    const totalItems = filteredData.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / MEMBERSHIP_BLOCK_PAGE_SIZE));
+    const safePage = Math.min(currentPage, totalPages);
+    const paginatedData = filteredData.slice(
+      (safePage - 1) * MEMBERSHIP_BLOCK_PAGE_SIZE,
+      safePage * MEMBERSHIP_BLOCK_PAGE_SIZE
+    );
+
+    return {
+      ...block,
+      filteredData,
+      paginatedData,
+      pagination: {
+        page: safePage,
+        totalItems,
+        totalPages,
+        limit: MEMBERSHIP_BLOCK_PAGE_SIZE
+      }
+    };
+  });
 
   return (
     <div>
@@ -779,17 +927,68 @@ export function DashboardPage() {
             <div className="space-y-5">
               {membershipBlocks.map((block) => (
                 <div key={block.key} className="rounded-2xl border border-brand-sand/70 p-3">
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className={`h-2.5 w-2.5 rounded-full ${block.marker}`} />
-                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-brand-forest">{block.title}</p>
-                    <span className="rounded-full bg-brand-cream px-2 py-1 text-xs font-semibold text-brand-forest/75">
-                      {block.data.length}
-                    </span>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${block.marker}`} />
+                      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-brand-forest">{block.title}</p>
+                      <span className="rounded-full bg-brand-cream px-2 py-1 text-xs font-semibold text-brand-forest/75">
+                        {block.filteredData.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                        disabled={!block.filteredData.length}
+                        onClick={() =>
+                          exportMembershipsToExcel(
+                            block.filteredData,
+                            block.title,
+                            `dashboard_membresias_${block.key}`
+                          )
+                        }
+                        type="button"
+                      >
+                        Exportar Excel
+                      </button>
+                      <button
+                        className="rounded-xl border border-brand-sand px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                        disabled={!block.filteredData.length}
+                        onClick={() =>
+                          exportMembershipsToPdf(
+                            block.filteredData,
+                            `Membresias ${block.title}`,
+                            `dashboard_membresias_${block.key}`
+                          )
+                        }
+                        type="button"
+                      >
+                        Exportar PDF
+                      </button>
+                    </div>
                   </div>
 
-                  {block.data.length ? (
+                  <div className="mb-3">
+                    <input
+                      className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3 text-sm"
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setMembershipSearch((current) => ({
+                          ...current,
+                          [block.key]: value
+                        }));
+                        setMembershipPages((current) => ({
+                          ...current,
+                          [block.key]: 1
+                        }));
+                      }}
+                      placeholder="Buscar por cliente, codigo, plan, telefono o estado"
+                      value={membershipSearch[block.key] || ''}
+                    />
+                  </div>
+
+                  {block.filteredData.length ? (
                     <div className="space-y-3">
-                      {block.data.map((membership) => {
+                      {block.paginatedData.map((membership) => {
                         const whatsappUrl = buildMembershipWhatsAppUrl(membership, block.key);
 
                         return (
@@ -834,6 +1033,19 @@ export function DashboardPage() {
                           </div>
                         );
                       })}
+                      <Pagination
+                        currentPage={block.pagination.page}
+                        itemLabel="membresias"
+                        onPageChange={(page) =>
+                          setMembershipPages((current) => ({
+                            ...current,
+                            [block.key]: page
+                          }))
+                        }
+                        pageSize={block.pagination.limit}
+                        totalItems={block.pagination.totalItems}
+                        totalPages={block.pagination.totalPages}
+                      />
                     </div>
                   ) : (
                     <p className="rounded-xl bg-brand-cream/60 px-3 py-3 text-sm text-brand-forest/70">

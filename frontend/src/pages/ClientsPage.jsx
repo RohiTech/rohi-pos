@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
@@ -708,6 +709,92 @@ export function ClientsPage() {
     }
   }
 
+  async function handleExportPdf() {
+    setError('');
+    setMessage('');
+    setExporting(true);
+
+    try {
+      const exportClients = await fetchAllClientsForExport();
+
+      if (!exportClients.length) {
+        setError('No hay clientes para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: 'a4'
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      const columns = ['Codigo', 'Nombre', 'Correo', 'Telefono', 'Ingreso', 'Estado', 'Notas'];
+      const usableWidth = pageWidth - margin * 2;
+      const colWidth = usableWidth / columns.length;
+      let y = margin;
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('Listado de clientes', margin, y);
+        y += 24;
+        doc.setFontSize(9);
+        columns.forEach((column, index) => {
+          doc.text(column, margin + index * colWidth + 2, y);
+        });
+        y += 8;
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 14;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportClients.forEach((client) => {
+        if (y > pageHeight - margin) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = [
+          client.client_code || '--',
+          `${client.first_name || ''} ${client.last_name || ''}`.trim() || '--',
+          client.email || '--',
+          client.phone || '--',
+          formatDate(client.join_date),
+          client.is_active ? 'Activo' : 'Inactivo',
+          client.notes || '--'
+        ];
+
+        row.forEach((value, index) => {
+          const text = doc.splitTextToSize(String(value), colWidth - 6)[0] || '--';
+          doc.text(text, margin + index * colWidth + 2, y);
+        });
+
+        y += 18;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      doc.save(`clientes_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar clientes en PDF');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -968,6 +1055,14 @@ export function ClientsPage() {
               type="button"
             >
               {exporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
+            <button
+              className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+              disabled={exporting || loading}
+              onClick={handleExportPdf}
+              type="button"
+            >
+              {exporting ? 'Exportando...' : 'Exportar PDF'}
             </button>
           </div>
           {loading ? <p className="text-sm text-brand-forest/70">Cargando clientes...</p> : null}
