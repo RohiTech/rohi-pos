@@ -27,6 +27,7 @@ const MOVEMENT_PAGE_SIZE = 8;
 const SALE_PAGE_SIZE = 5;
 const CASH_MOVEMENT_PAGE_SIZE = 8;
 const POS_GRID_PAGE_SIZE = 10;
+const CASH_CLOSE_RECEIPTS_PAGE_SIZE = 6;
 const posCategoryStorageKey = 'rohipos_pos_categories_collapsed';
 
 const keypadButtons = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '00', '.'];
@@ -150,6 +151,8 @@ export function PosPage() {
   const [salePage, setSalePage] = useState(1);
   const [cashMovementPage, setCashMovementPage] = useState(1);
   const [posGridPage, setPosGridPage] = useState(1);
+  const [issuedReceiptsPage, setIssuedReceiptsPage] = useState(1);
+  const [voidedReceiptsPage, setVoidedReceiptsPage] = useState(1);
   const [productPagination, setProductPagination] = useState({
     page: 1,
     limit: PRODUCT_PAGE_SIZE,
@@ -294,6 +297,24 @@ export function PosPage() {
   const cashCloseMetrics = cashCloseSummary.metrics || {};
   const receiptsIssued = cashCloseSummary.receipts_issued || [];
   const receiptsVoided = cashCloseSummary.receipts_voided || [];
+  const issuedReceiptsTotalPages = Math.max(
+    1,
+    Math.ceil(receiptsIssued.length / CASH_CLOSE_RECEIPTS_PAGE_SIZE)
+  );
+  const voidedReceiptsTotalPages = Math.max(
+    1,
+    Math.ceil(receiptsVoided.length / CASH_CLOSE_RECEIPTS_PAGE_SIZE)
+  );
+  const safeIssuedReceiptsPage = Math.min(issuedReceiptsPage, issuedReceiptsTotalPages);
+  const safeVoidedReceiptsPage = Math.min(voidedReceiptsPage, voidedReceiptsTotalPages);
+  const paginatedReceiptsIssued = useMemo(() => {
+    const startIndex = (safeIssuedReceiptsPage - 1) * CASH_CLOSE_RECEIPTS_PAGE_SIZE;
+    return receiptsIssued.slice(startIndex, startIndex + CASH_CLOSE_RECEIPTS_PAGE_SIZE);
+  }, [receiptsIssued, safeIssuedReceiptsPage]);
+  const paginatedReceiptsVoided = useMemo(() => {
+    const startIndex = (safeVoidedReceiptsPage - 1) * CASH_CLOSE_RECEIPTS_PAGE_SIZE;
+    return receiptsVoided.slice(startIndex, startIndex + CASH_CLOSE_RECEIPTS_PAGE_SIZE);
+  }, [receiptsVoided, safeVoidedReceiptsPage]);
   const cashMovements = cashMovementsQuery.data?.data || [];
   const cashMovementsSummary = cashMovementsSummaryQuery.data?.data || {};
   const movements = movementsQuery.data?.data || [];
@@ -337,6 +358,18 @@ export function PosPage() {
       setCashMovementPage(cashMovementPagination.totalPages);
     }
   }, [cashMovementPage, cashMovementPagination.totalPages]);
+
+  useEffect(() => {
+    if (issuedReceiptsPage > issuedReceiptsTotalPages) {
+      setIssuedReceiptsPage(issuedReceiptsTotalPages);
+    }
+  }, [issuedReceiptsPage, issuedReceiptsTotalPages]);
+
+  useEffect(() => {
+    if (voidedReceiptsPage > voidedReceiptsTotalPages) {
+      setVoidedReceiptsPage(voidedReceiptsTotalPages);
+    }
+  }, [voidedReceiptsPage, voidedReceiptsTotalPages]);
 
   useEffect(() => {
     if (movementsQuery.data?.pagination) {
@@ -2538,7 +2571,7 @@ export function PosPage() {
                     <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos emitidos</p>
                     <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
                       {receiptsIssued.length ? (
-                        receiptsIssued.slice(0, 20).map((receipt) => (
+                        paginatedReceiptsIssued.map((receipt) => (
                           <div key={receipt.id} className="rounded-xl border border-brand-sand/50 px-3 py-2">
                             <p className="text-sm font-semibold text-brand-forest">{receipt.sale_number}</p>
                             <p className="text-xs text-brand-forest/70">
@@ -2550,13 +2583,21 @@ export function PosPage() {
                         <p className="text-sm text-brand-forest/70">Sin recibos emitidos en esta sesion.</p>
                       )}
                     </div>
+                    <Pagination
+                      currentPage={safeIssuedReceiptsPage}
+                      itemLabel="recibos"
+                      onPageChange={setIssuedReceiptsPage}
+                      pageSize={CASH_CLOSE_RECEIPTS_PAGE_SIZE}
+                      totalItems={receiptsIssued.length}
+                      totalPages={issuedReceiptsTotalPages}
+                    />
                   </article>
 
                   <article className="rounded-2xl border border-brand-sand/60 p-3">
                     <p className="text-xs uppercase tracking-[0.18em] text-brand-moss">Recibos anulados</p>
                     <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
                       {receiptsVoided.length ? (
-                        receiptsVoided.slice(0, 20).map((receipt) => (
+                        paginatedReceiptsVoided.map((receipt) => (
                           <div key={receipt.id} className="rounded-xl border border-brand-sand/50 px-3 py-2">
                             <p className="text-sm font-semibold text-brand-forest">{receipt.sale_number}</p>
                             <p className="text-xs text-brand-forest/70">
@@ -2568,6 +2609,14 @@ export function PosPage() {
                         <p className="text-sm text-brand-forest/70">Sin recibos anulados en esta sesion.</p>
                       )}
                     </div>
+                    <Pagination
+                      currentPage={safeVoidedReceiptsPage}
+                      itemLabel="recibos"
+                      onPageChange={setVoidedReceiptsPage}
+                      pageSize={CASH_CLOSE_RECEIPTS_PAGE_SIZE}
+                      totalItems={receiptsVoided.length}
+                      totalPages={voidedReceiptsTotalPages}
+                    />
                   </article>
                 </div>
               </section>
