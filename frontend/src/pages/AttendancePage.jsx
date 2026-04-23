@@ -18,6 +18,7 @@ const initialForm = {
 };
 
 const SCAN_COOLDOWN_MS = 3000;
+const DAILY_PAYMENTS_PAGE_SIZE = 8;
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 function parseQrPayload(rawValue) {
@@ -147,6 +148,7 @@ export function AttendancePage() {
   const [summary, setSummary] = useState(null);
   const [dailyPayments, setDailyPayments] = useState([]);
   const [dailyPaymentsSearch, setDailyPaymentsSearch] = useState('');
+  const [dailyPaymentsPage, setDailyPaymentsPage] = useState(1);
   const [reprintingPaymentId, setReprintingPaymentId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [form, setForm] = useState(initialForm);
@@ -576,7 +578,17 @@ export function AttendancePage() {
       notes.includes(normalizedDailyPaymentsSearch)
     );
   });
+  const dailyPaymentsTotalPages = Math.max(1, Math.ceil(filteredDailyPayments.length / DAILY_PAYMENTS_PAGE_SIZE));
+  const safeDailyPaymentsPage = Math.min(dailyPaymentsPage, dailyPaymentsTotalPages);
+  const paginatedDailyPayments = filteredDailyPayments.slice(
+    (safeDailyPaymentsPage - 1) * DAILY_PAYMENTS_PAGE_SIZE,
+    safeDailyPaymentsPage * DAILY_PAYMENTS_PAGE_SIZE
+  );
   const pendingCheckinCount = dailyPayments.filter((payment) => !payment.used_for_checkin_today).length;
+
+  useEffect(() => {
+    setDailyPaymentsPage((currentPage) => Math.min(currentPage, dailyPaymentsTotalPages));
+  }, [dailyPaymentsTotalPages]);
 
   function handleExportClientsExcel() {
     if (!clients.length) {
@@ -935,7 +947,10 @@ export function AttendancePage() {
           <DataPanel title="Pagos de rutina del dia" subtitle="Clientes que ya pagaron su rutina hoy.">
             <input
               className="w-full rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
-              onChange={(event) => setDailyPaymentsSearch(event.target.value)}
+              onChange={(event) => {
+                setDailyPaymentsSearch(event.target.value);
+                setDailyPaymentsPage(1);
+              }}
               placeholder="Buscar por codigo, cliente, metodo o nota"
               value={dailyPaymentsSearch}
             />
@@ -969,7 +984,7 @@ export function AttendancePage() {
               </div>
             ) : (
               <div className="mt-4 space-y-3">
-                {filteredDailyPayments.map((payment) => (
+                {paginatedDailyPayments.map((payment) => (
                   <article key={payment.id} className="rounded-2xl border border-brand-sand/70 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -1008,6 +1023,14 @@ export function AttendancePage() {
                     </p>
                   </article>
                 ))}
+                <Pagination
+                  currentPage={safeDailyPaymentsPage}
+                  itemLabel="pagos"
+                  onPageChange={setDailyPaymentsPage}
+                  pageSize={DAILY_PAYMENTS_PAGE_SIZE}
+                  totalItems={filteredDailyPayments.length}
+                  totalPages={dailyPaymentsTotalPages}
+                />
               </div>
             )}
           </DataPanel>
