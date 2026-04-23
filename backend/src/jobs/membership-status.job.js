@@ -1,6 +1,10 @@
 import { query } from '../config/db.js';
 
 const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+const ON_DEMAND_REFRESH_COOLDOWN_MS = 15 * 1000;
+
+let lastRefreshAt = 0;
+let inFlightRefreshPromise = null;
 
 function getNextRunAt(reference = new Date()) {
   const nextRunAt = new Date(reference);
@@ -33,6 +37,40 @@ export async function refreshMembershipStatuses() {
   return result.rowCount || 0;
 }
 
+export async function refreshMembershipStatusesIfNeeded(options = {}) {
+  const maxAgeMs = Number.isFinite(options.maxAgeMs)
+    ? Math.max(0, Number(options.maxAgeMs))
+    : ON_DEMAND_REFRESH_COOLDOWN_MS;
+  const now = Date.now();
+
+  if (now - lastRefreshAt <= maxAgeMs) {
+    return {
+      skipped: true,
+      updatedRows: 0,
+      refreshedAt: lastRefreshAt
+    };
+  }
+
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
+  }
+
+  inFlightRefreshPromise = refreshMembershipStatuses()
+    .then((updatedRows) => {
+      lastRefreshAt = Date.now();
+      return {
+        skipped: false,
+        updatedRows,
+        refreshedAt: lastRefreshAt
+      };
+    })
+    .finally(() => {
+      inFlightRefreshPromise = null;
+    });
+
+  return inFlightRefreshPromise;
+}
+
 export function startMembershipStatusScheduler() {
   let timeoutId = null;
 
@@ -44,6 +82,7 @@ export function startMembershipStatusScheduler() {
     timeoutId = setTimeout(async () => {
       try {
         const updatedRows = await refreshMembershipStatuses();
+        lastRefreshAt = Date.now();
         console.log(`[MembershipScheduler] Estado actualizado. Registros afectados: ${updatedRows}`);
       } catch (error) {
         console.error('[MembershipScheduler] Error actualizando estados de membresia:', error);
@@ -62,6 +101,7 @@ export function startMembershipStatusScheduler() {
   // Keep the scheduler aligned with 00:01 while preventing stale data after restarts.
   refreshMembershipStatuses()
     .then((updatedRows) => {
+      lastRefreshAt = Date.now();
       console.log(`[MembershipScheduler] Verificacion inicial completada. Registros afectados: ${updatedRows}`);
     })
     .catch((error) => {

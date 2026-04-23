@@ -13,6 +13,7 @@ import {
   parsePaginationParams,
   parsePositiveInteger
 } from '../utils/http.js';
+import { refreshMembershipStatusesIfNeeded } from '../jobs/membership-status.job.js';
 
 const membershipsRouter = Router();
 
@@ -95,6 +96,8 @@ async function getMembershipById(membershipId) {
 
 membershipsRouter.get('/', async (request, response, next) => {
   try {
+    await refreshMembershipStatusesIfNeeded();
+
     const { page, limit, offset } = parsePaginationParams(request.query, {
       defaultLimit: 6,
       maxLimit: 100
@@ -168,6 +171,8 @@ membershipsRouter.get('/', async (request, response, next) => {
 
 membershipsRouter.get('/summary', async (_request, response, next) => {
   try {
+    await refreshMembershipStatusesIfNeeded();
+
     const result = await query(
       `SELECT
          COUNT(*)::int AS total_memberships,
