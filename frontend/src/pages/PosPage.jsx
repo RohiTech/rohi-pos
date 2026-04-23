@@ -215,6 +215,7 @@ export function PosPage() {
   const [productExporting, setProductExporting] = useState(false);
   const [cashMovementExporting, setCashMovementExporting] = useState(false);
   const [movementExporting, setMovementExporting] = useState(false);
+  const [movementPdfExporting, setMovementPdfExporting] = useState(false);
 
   const productOptionsQuery = useApi(() => apiGet('/products?limit=100'), [refreshKey]);
   const productCatalogQuery = useApi(
@@ -1145,6 +1146,122 @@ export function PosPage() {
       setError(requestError.message || 'No fue posible exportar historial de inventario');
     } finally {
       setMovementExporting(false);
+    }
+  }
+
+  async function handleExportMovementsPdf() {
+    clearMessages();
+
+    if (!selectedProductId) {
+      setError('Selecciona un producto para exportar su historial');
+      return;
+    }
+
+    setMovementPdfExporting(true);
+
+    try {
+      const exportMovements = await fetchAllInventoryMovementsForExport();
+
+      if (!exportMovements.length) {
+        setError('No hay movimientos para exportar con el filtro actual');
+        return;
+      }
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const margin = 28;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      let y = margin;
+
+      const columns = [
+        { key: 'fecha', label: 'Fecha', width: 80 },
+        { key: 'tipo', label: 'Tipo', width: 80 },
+        { key: 'cantidad', label: 'Cantidad', width: 68 },
+        { key: 'antes', label: 'Antes', width: 62 },
+        { key: 'despues', label: 'Despues', width: 72 },
+        { key: 'costo', label: 'Costo unit.', width: 78 },
+        { key: 'referencia', label: 'Referencia', width: 130 },
+        { key: 'notas', label: 'Notas', width: 190 }
+      ];
+
+      const drawHeader = () => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.text('Historial de inventario', margin, y);
+        y += 16;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(
+          `Producto: ${selectedProduct?.sku || '--'} - ${selectedProduct?.name || '--'} | Filtro: ${movementSearch.trim() || 'Ninguno'}`,
+          margin,
+          y
+        );
+        y += 14;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        let x = margin;
+        columns.forEach((col) => {
+          doc.text(col.label, x + 2, y);
+          x += col.width;
+        });
+
+        y += 10;
+        doc.setDrawColor(190, 190, 190);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 12;
+      };
+
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+
+      exportMovements.forEach((movement) => {
+        if (y > pageHeight - margin - 20) {
+          doc.addPage();
+          y = margin;
+          drawHeader();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+        }
+
+        const row = {
+          fecha: formatDate(movement.moved_at),
+          tipo: movementLabels[movement.movement_type] || movement.movement_type,
+          cantidad: String(Number(movement.quantity || 0)),
+          antes: String(Number(movement.previous_stock || 0)),
+          despues: String(Number(movement.new_stock || 0)),
+          costo: movement.unit_cost == null ? '--' : formatCurrency(movement.unit_cost),
+          referencia: movement.reference_type
+            ? `${movement.reference_type}${movement.reference_id ? `#${movement.reference_id}` : ''}`
+            : '--',
+          notas: movement.notes || '--'
+        };
+
+        let x = margin;
+        columns.forEach((col) => {
+          const text = doc.splitTextToSize(String(row[col.key] || '--'), col.width - 6)[0] || '--';
+          doc.text(text, x + 2, y);
+          x += col.width;
+        });
+
+        y += 14;
+      });
+
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('');
+
+      const productSlug = String(selectedProduct?.sku || 'producto').replace(/[^a-zA-Z0-9_-]/g, '_');
+      doc.save(`historial_inventario_${productSlug}_${stamp}.pdf`);
+    } catch (requestError) {
+      setError(requestError.message || 'No fue posible exportar historial de inventario en PDF');
+    } finally {
+      setMovementPdfExporting(false);
     }
   }
 
@@ -3157,14 +3274,24 @@ export function PosPage() {
                 placeholder="Buscar por tipo, referencia o nota"
                 value={movementSearch}
               />
-              <button
-                className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
-                disabled={movementExporting || movementsQuery.loading || !selectedProductId}
-                onClick={handleExportMovementsExcel}
-                type="button"
-              >
-                {movementExporting ? 'Exportando...' : 'Exportar Excel'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                  disabled={movementPdfExporting || movementsQuery.loading || !selectedProductId}
+                  onClick={handleExportMovementsPdf}
+                  type="button"
+                >
+                  {movementPdfExporting ? 'Exportando PDF...' : 'Exportar PDF'}
+                </button>
+                <button
+                  className="rounded-2xl border border-brand-sand px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-forest disabled:opacity-60"
+                  disabled={movementExporting || movementsQuery.loading || !selectedProductId}
+                  onClick={handleExportMovementsExcel}
+                  type="button"
+                >
+                  {movementExporting ? 'Exportando...' : 'Exportar Excel'}
+                </button>
+              </div>
             </div>
 
             {movementsQuery.loading ? (
