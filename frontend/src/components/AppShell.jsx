@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { apiPost } from '../lib/api';
 
 const navigation = [
   { to: '/', label: 'Dashboard', shortLabel: 'DB' },
@@ -28,6 +29,7 @@ function navClassName({ isActive }, isCollapsed) {
 }
 
 export function AppShell() {
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { settings } = useSettings();
   const companyName = settings.company_name || 'RohiPOS';
@@ -38,10 +40,91 @@ export function AppShell() {
 
     return window.localStorage.getItem(sidebarStorageKey) === 'true';
   });
+  const [kioskAccessModalOpen, setKioskAccessModalOpen] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [kioskAccessLoading, setKioskAccessLoading] = useState(false);
+  const [kioskAccessError, setKioskAccessError] = useState('');
 
   useEffect(() => {
     window.localStorage.setItem(sidebarStorageKey, String(isCollapsed));
   }, [isCollapsed]);
+
+  useEffect(() => {
+    if (!kioskAccessModalOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !kioskAccessLoading) {
+        setKioskAccessModalOpen(false);
+        setKioskAccessError('');
+        setAdminUsername('');
+        setAdminPassword('');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [kioskAccessLoading, kioskAccessModalOpen]);
+
+  function openKioskAccessModal() {
+    setKioskAccessModalOpen(true);
+    setKioskAccessError('');
+    setAdminUsername('');
+    setAdminPassword('');
+  }
+
+  function closeKioskAccessModal() {
+    if (kioskAccessLoading) {
+      return;
+    }
+
+    setKioskAccessModalOpen(false);
+    setKioskAccessError('');
+    setAdminUsername('');
+    setAdminPassword('');
+  }
+
+  async function handleKioskAccessSubmit(event) {
+    event.preventDefault();
+
+    const normalizedUsername = String(adminUsername || '').trim();
+    const normalizedPassword = String(adminPassword || '');
+
+    if (!normalizedUsername || !normalizedPassword) {
+      setKioskAccessError('Ingresa usuario y clave de administrador.');
+      return;
+    }
+
+    setKioskAccessLoading(true);
+    setKioskAccessError('');
+
+    try {
+      const response = await apiPost('/auth/login', {
+        username: normalizedUsername,
+        password: normalizedPassword
+      });
+      const roleName = String(response?.data?.user?.role_name || '').toLowerCase();
+
+      if (roleName !== 'admin') {
+        setKioskAccessError('El usuario no tiene permisos de administrador.');
+        return;
+      }
+
+      setKioskAccessModalOpen(false);
+      setAdminUsername('');
+      setAdminPassword('');
+      navigate('/attendance-kiosk');
+    } catch (_error) {
+      setKioskAccessError('Clave de administrador invalida.');
+    } finally {
+      setKioskAccessLoading(false);
+    }
+  }
 
   return (
     <div className="min-h-screen text-brand-ink">
@@ -82,15 +165,28 @@ export function AppShell() {
 
           <nav className="grid gap-2">
             {navigation.map((item) => (
-              <NavLink
-                key={item.to}
-                className={(navState) => navClassName(navState, isCollapsed)}
-                title={isCollapsed ? item.label : undefined}
-                to={item.to}
-                end={item.to === '/'}
-              >
-                {isCollapsed ? item.shortLabel : item.label}
-              </NavLink>
+              item.to === '/attendance-kiosk' ? (
+                <button
+                  key={item.to}
+                  className={navClassName({ isActive: false }, isCollapsed)}
+                  onClick={openKioskAccessModal}
+                  style={{ textAlign: isCollapsed ? 'center' : 'left' }}
+                  title={isCollapsed ? item.label : undefined}
+                  type="button"
+                >
+                  {isCollapsed ? item.shortLabel : item.label}
+                </button>
+              ) : (
+                <NavLink
+                  key={item.to}
+                  className={(navState) => navClassName(navState, isCollapsed)}
+                  title={isCollapsed ? item.label : undefined}
+                  to={item.to}
+                  end={item.to === '/'}
+                >
+                  {isCollapsed ? item.shortLabel : item.label}
+                </NavLink>
+              )
             ))}
           </nav>
 
@@ -121,6 +217,65 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {kioskAccessModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-brand-sand/70 bg-white p-5 shadow-panel">
+            <h2 className="text-xl font-semibold text-brand-forest">Acceso al kiosko</h2>
+            <p className="mt-2 text-sm text-brand-forest/70">
+              Ingresa credenciales de administrador para abrir el modo kiosko.
+            </p>
+
+            <form className="mt-4 grid gap-3" onSubmit={handleKioskAccessSubmit}>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Usuario admin</span>
+                <input
+                  autoComplete="username"
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={(event) => setAdminUsername(event.target.value)}
+                  placeholder="Ej: admin"
+                  value={adminUsername}
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-brand-forest">Clave admin</span>
+                <input
+                  autoComplete="current-password"
+                  className="rounded-2xl border border-brand-sand bg-brand-cream/40 px-4 py-3"
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                  placeholder="Ingresa la clave"
+                  type="password"
+                  value={adminPassword}
+                />
+              </label>
+
+              {kioskAccessError ? (
+                <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {kioskAccessError}
+                </p>
+              ) : null}
+
+              <div className="mt-1 flex justify-end gap-2">
+                <button
+                  className="rounded-2xl border border-brand-sand px-4 py-2 text-sm font-semibold text-brand-forest"
+                  onClick={closeKioskAccessModal}
+                  type="button"
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="rounded-2xl bg-brand-moss px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  disabled={kioskAccessLoading}
+                  type="submit"
+                >
+                  {kioskAccessLoading ? 'Validando...' : 'Entrar al kiosko'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
