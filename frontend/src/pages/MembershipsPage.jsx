@@ -6,7 +6,7 @@ import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
-import { apiGet, apiPost, apiPut, authToken, buildQueryString } from '../lib/api';
+import { apiFetch, apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 import { useSettings } from '../context/SettingsContext';
 import * as XLSX from 'xlsx';
@@ -37,8 +37,6 @@ const initialMembershipForm = {
 
 const PLAN_PAGE_SIZE = 6;
 const MEMBERSHIP_PAGE_SIZE = 6;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-
 function formatDateInput(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -141,13 +139,7 @@ export function MembershipsPage() {
       throw new Error('No se pudo obtener el identificador de la membresia para imprimir el recibo.');
     }
 
-    const response = await fetch(`${API_URL}/memberships/${membershipId}/receipt/pdf`, {
-      headers: authToken
-        ? {
-            Authorization: `Bearer ${authToken}`
-          }
-        : {}
-    });
+    const response = await apiFetch(`/memberships/${membershipId}/receipt/pdf`);
 
     if (!response.ok) {
       throw new Error('No se pudo abrir el recibo de la membresia.');

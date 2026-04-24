@@ -5,6 +5,20 @@ export function setAuthToken(token) {
   authToken = token || '';
 }
 
+export function buildApiUrl(path = '') {
+  const normalizedPath = String(path || '');
+  return `${API_URL}${normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`}`;
+}
+
+export function getAuthHeaders(headers = {}) {
+  return authToken
+    ? {
+        ...headers,
+        Authorization: `Bearer ${authToken}`
+      }
+    : headers;
+}
+
 export function buildQueryString(params = {}) {
   const searchParams = new URLSearchParams();
 
@@ -31,27 +45,18 @@ async function handleResponse(response) {
 }
 
 export async function apiGet(path) {
-  const response = await fetch(`${API_URL}${path}`, {
-    headers: authToken
-      ? {
-          Authorization: `Bearer ${authToken}`
-        }
-      : {}
+  const response = await fetch(buildApiUrl(path), {
+    headers: getAuthHeaders()
   });
   return handleResponse(response);
 }
 
 export async function apiPost(path, payload) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(authToken
-        ? {
-            Authorization: `Bearer ${authToken}`
-          }
-        : {})
-    },
+    headers: getAuthHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(payload)
   });
 
@@ -59,13 +64,9 @@ export async function apiPost(path, payload) {
 }
 
 export async function apiPostForm(path, formData) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'POST',
-    headers: authToken
-      ? {
-          Authorization: `Bearer ${authToken}`
-        }
-      : {},
+    headers: getAuthHeaders(),
     body: formData
   });
 
@@ -73,16 +74,11 @@ export async function apiPostForm(path, formData) {
 }
 
 export async function apiPut(path, payload) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(authToken
-        ? {
-            Authorization: `Bearer ${authToken}`
-          }
-        : {})
-    },
+    headers: getAuthHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(payload)
   });
 
@@ -90,17 +86,20 @@ export async function apiPut(path, payload) {
 }
 
 export async function apiPutForm(path, formData) {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     method: 'PUT',
-    headers: authToken
-      ? {
-          Authorization: `Bearer ${authToken}`
-        }
-      : {},
+    headers: getAuthHeaders(),
     body: formData
   });
 
   return handleResponse(response);
+}
+
+export async function apiFetch(path, options = {}) {
+  return fetch(buildApiUrl(path), {
+    ...options,
+    headers: getAuthHeaders(options.headers || {})
+  });
 }
 
 export { authToken }; // Exportar el token para uso en otras partes

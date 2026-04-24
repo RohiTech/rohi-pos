@@ -4,7 +4,7 @@ import { DataPanel } from '../components/DataPanel';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
 import { Pagination } from '../components/Pagination';
-import { apiGet, apiPost, apiPut, buildQueryString, authToken } from '../lib/api';
+import { apiFetch, apiGet, apiPost, apiPut, buildQueryString } from '../lib/api';
 import { formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
@@ -47,8 +47,6 @@ const initialClientForm = {
 };
 
 const PAGE_SIZE = 8;
-const REPORTS_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-
 export function ClientsPage() {
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
@@ -328,16 +326,7 @@ export function ClientsPage() {
     setMessage('');
 
     try {
-      const response = await fetch(
-        `${REPORTS_API_URL}/reports/membership-card/client/${editingClientId}/pdf`,
-        {
-          headers: authToken
-            ? {
-                Authorization: `Bearer ${authToken}`
-              }
-            : {}
-        }
-      );
+      const response = await apiFetch(`/reports/membership-card/client/${editingClientId}/pdf`);
 
       if (!response.ok) {
         let message = 'No fue posible generar el carnet de membresia';

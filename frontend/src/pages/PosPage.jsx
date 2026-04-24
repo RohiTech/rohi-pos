@@ -6,7 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useApi } from '../hooks/useApi';
-import { apiGet, apiPost, apiPostForm, apiPut, apiPutForm, authToken, buildQueryString } from '../lib/api';
+import { apiFetch, apiGet, apiPost, apiPostForm, apiPut, apiPutForm, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 import * as XLSX from 'xlsx';
 
@@ -654,11 +654,8 @@ export function PosPage() {
     setExportingCashClosePdf(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/cash-register/current/summary/pdf', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${authToken}`
-        }
+      const response = await apiFetch('/cash-register/current/summary/pdf', {
+        method: 'GET'
       });
 
       if (!response.ok) {
@@ -754,11 +751,8 @@ export function PosPage() {
       return;
     }
 
-    const response = await fetch(`http://localhost:3001/api/sales/${saleId}/voucher/pdf`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${authToken}`
-      }
+    const response = await apiFetch(`/sales/${saleId}/voucher/pdf`, {
+      method: 'GET'
     });
 
     if (!response.ok) {

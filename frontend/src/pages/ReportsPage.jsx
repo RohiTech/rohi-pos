@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import SimpleModal from '../components/SimpleModal';
 import { useSettings } from '../context/SettingsContext';
-import { apiGet, authToken, buildQueryString } from '../lib/api';
+import { apiGet, buildQueryString, authToken } from '../lib/api';
 
 const reportModules = [
   {
@@ -869,7 +869,7 @@ export function ReportsPage() {
       product_id: params.productId,
       product_search: params.productId ? '' : params.productSearch.trim()
     });
-    fetch(`http://localhost:3001/api/reports/product-sales/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/product-sales/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -904,7 +904,7 @@ export function ReportsPage() {
       source_type: dailyParams.sourceType
     });
 
-    fetch(`http://localhost:3001/api/reports/daily-sales/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/daily-sales/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -938,7 +938,7 @@ export function ReportsPage() {
       session_status: cashParams.sessionStatus
     });
 
-    fetch(`http://localhost:3001/api/reports/cash-summary/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/cash-summary/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -973,7 +973,7 @@ export function ReportsPage() {
       cash_register_session_id: sellerParams.cashSessionId
     });
 
-    fetch(`http://localhost:3001/api/reports/seller-sales/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/seller-sales/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1007,7 +1007,7 @@ export function ReportsPage() {
       only_with_active_membership: activeClientsParams.onlyWithActiveMembership
     });
 
-    fetch(`http://localhost:3001/api/reports/active-clients/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/active-clients/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1042,7 +1042,7 @@ export function ReportsPage() {
       with_membership: newClientsParams.withMembership
     });
 
-    fetch(`http://localhost:3001/api/reports/new-clients/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/new-clients/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1076,7 +1076,7 @@ export function ReportsPage() {
       with_membership: inactiveClientsParams.withMembership
     });
 
-    fetch(`http://localhost:3001/api/reports/inactive-clients/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/inactive-clients/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1110,7 +1110,7 @@ export function ReportsPage() {
       only_active_clients: noVisitDaysParams.onlyActiveClients
     });
 
-    fetch(`http://localhost:3001/api/reports/clients-no-visit-days/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/clients-no-visit-days/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1146,7 +1146,7 @@ export function ReportsPage() {
       only_active_clients: membershipsByClientParams.onlyActiveClients
     });
 
-    fetch(`http://localhost:3001/api/reports/memberships-by-client/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/memberships-by-client/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1181,7 +1181,7 @@ export function ReportsPage() {
       include_pending: activeMembershipsParams.includePending
     });
 
-    fetch(`http://localhost:3001/api/reports/active-memberships/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/active-memberships/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1215,7 +1215,7 @@ export function ReportsPage() {
       plan_id: membershipsByPlanParams.planId
     });
 
-    fetch(`http://localhost:3001/api/reports/memberships-by-plan/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/memberships-by-plan/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1250,7 +1250,7 @@ export function ReportsPage() {
       only_active_clients: upcomingRenewalsParams.onlyActiveClients
     });
 
-    fetch(`http://localhost:3001/api/reports/upcoming-renewals/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/upcoming-renewals/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1286,7 +1286,7 @@ export function ReportsPage() {
       only_active_clients: membershipsExpiringWindowParams.onlyActiveClients
     });
 
-    fetch(`http://localhost:3001/api/reports/memberships-expiring-window/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/memberships-expiring-window/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1320,7 +1320,7 @@ export function ReportsPage() {
       only_paid: recurringIncomeParams.onlyPaid
     });
 
-    fetch(`http://localhost:3001/api/reports/recurring-income/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/recurring-income/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1352,7 +1352,7 @@ export function ReportsPage() {
       fechaFin: membershipKpiParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/expired-memberships/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/expired-memberships/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1384,7 +1384,7 @@ export function ReportsPage() {
       fechaFin: membershipKpiParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/renewal-rate/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/renewal-rate/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1416,7 +1416,7 @@ export function ReportsPage() {
       months_ahead: projectedIncomeParams.monthsAhead
     });
 
-    fetch(`http://localhost:3001/api/reports/projected-income/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/projected-income/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1450,7 +1450,7 @@ export function ReportsPage() {
       include_zero_stock: inventoryCurrentParams.includeZeroStock
     });
 
-    fetch(`http://localhost:3001/api/reports/inventory-current/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/inventory-current/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1484,7 +1484,7 @@ export function ReportsPage() {
       include_zero_minimum: lowStockParams.includeZeroMinimum
     });
 
-    fetch(`http://localhost:3001/api/reports/low-stock-products/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/low-stock-products/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1520,7 +1520,7 @@ export function ReportsPage() {
       search: inventoryMovementsParams.search.trim()
     });
 
-    fetch(`http://localhost:3001/api/reports/inventory-movements/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/inventory-movements/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1559,7 +1559,7 @@ export function ReportsPage() {
       fechaFin: productKardexParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/product-kardex/pdf${query}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/product-kardex/pdf${query}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1591,7 +1591,7 @@ export function ReportsPage() {
       fechaFin: attendanceDailyParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/attendance-daily/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/attendance-daily/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1625,7 +1625,7 @@ export function ReportsPage() {
       status: attendanceByClientParams.status
     });
 
-    fetch(`http://localhost:3001/api/reports/attendance-by-client/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/attendance-by-client/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1660,7 +1660,7 @@ export function ReportsPage() {
       access_type: attendanceClientDetailParams.accessType
     });
 
-    fetch(`http://localhost:3001/api/reports/attendance-client-detail/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/attendance-client-detail/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1692,7 +1692,7 @@ export function ReportsPage() {
       fechaFin: attendanceDailyParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/daily-pass-without-attendance/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/daily-pass-without-attendance/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1724,7 +1724,7 @@ export function ReportsPage() {
       fechaFin: operationalStatsParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/attendance-vs-income/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/attendance-vs-income/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1756,7 +1756,7 @@ export function ReportsPage() {
       fechaFin: operationalStatsParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/hourly-occupancy/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/hourly-occupancy/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1788,7 +1788,7 @@ export function ReportsPage() {
       fechaFin: operationalStatsParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/real-active-clients/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/real-active-clients/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1820,7 +1820,7 @@ export function ReportsPage() {
       fechaFin: financialParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/cash-flow/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/cash-flow/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1852,7 +1852,7 @@ export function ReportsPage() {
       fechaFin: financialParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/income-by-payment-method/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/income-by-payment-method/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1885,7 +1885,7 @@ export function ReportsPage() {
       limit: topClientsParams.limit
     });
 
-    fetch(`http://localhost:3001/api/reports/top-clients/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/top-clients/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1918,7 +1918,7 @@ export function ReportsPage() {
       limit: topProductsParams.limit
     });
 
-    fetch(`http://localhost:3001/api/reports/top-products/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/top-products/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`
@@ -1950,7 +1950,7 @@ export function ReportsPage() {
       fechaFin: salesByHourParams.fechaFin
     });
 
-    fetch(`http://localhost:3001/api/reports/sales-by-hour/pdf${reportQuery}`, {
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/reports/sales-by-hour/pdf${reportQuery}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${authToken}`

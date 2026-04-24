@@ -7,7 +7,7 @@ import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { apiGet, apiPost, authToken, buildQueryString } from '../lib/api';
+import { apiFetch, apiGet, apiPost, buildQueryString } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const initialForm = {
@@ -19,8 +19,6 @@ const initialForm = {
 
 const SCAN_COOLDOWN_MS = 3000;
 const DAILY_PAYMENTS_PAGE_SIZE = 8;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-
 function parseQrPayload(rawValue) {
   const rawText = String(rawValue || '').trim();
 
@@ -192,13 +190,7 @@ export function AttendancePage() {
       return;
     }
 
-    const response = await fetch(`${API_URL}/attendance/daily-pass-payments/${paymentId}/receipt/pdf`, {
-      headers: authToken
-        ? {
-            Authorization: `Bearer ${authToken}`
-          }
-        : {}
-    });
+    const response = await apiFetch(`/attendance/daily-pass-payments/${paymentId}/receipt/pdf`);
 
     if (!response.ok) {
       throw new Error('No se pudo abrir el recibo del pago diario.');
