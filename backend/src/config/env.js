@@ -2,6 +2,16 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function requireEnv(name) {
+  const value = process.env[name];
+
+  if (value === undefined || String(value).trim() === '') {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
 function parseBoolean(value, defaultValue = false) {
   if (value === undefined) {
     return defaultValue;
@@ -15,16 +25,27 @@ function parseNumber(value, defaultValue) {
   return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
+function parseRequiredNumber(name) {
+  const value = requireEnv(name);
+  const parsed = Number(value);
+
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${name} must be a valid number`);
+  }
+
+  return parsed;
+}
+
 export const env = {
   appName: process.env.APP_NAME || 'RohiPOS API',
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseNumber(process.env.PORT, 3001),
   db: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseNumber(process.env.DB_PORT, 5432),
-    name: process.env.DB_NAME || 'rohipos',
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
+    host: requireEnv('DB_HOST'),
+    port: parseRequiredNumber('DB_PORT'),
+    name: requireEnv('DB_NAME'),
+    user: requireEnv('DB_USER'),
+    password: requireEnv('DB_PASSWORD'),
     ssl: parseBoolean(process.env.DB_SSL, false)
   },
   auth: {

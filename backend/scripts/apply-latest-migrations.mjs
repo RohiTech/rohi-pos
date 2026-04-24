@@ -10,11 +10,32 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
-const dbHost = process.env.DB_HOST ? process.env.DB_HOST : 'localhost';
-const dbPort = Number(process.env.DB_PORT ? process.env.DB_PORT : '5432');
-const dbName = process.env.DB_NAME ? process.env.DB_NAME : 'rohipos';
-const dbUser = process.env.DB_USER ? process.env.DB_USER : 'postgres';
-const dbPassword = process.env.DB_PASSWORD ? process.env.DB_PASSWORD : 'postgres';
+function requireEnv(name) {
+  const value = process.env[name];
+
+  if (value === undefined || String(value).trim() === '') {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
+function parseRequiredNumber(name) {
+  const value = requireEnv(name);
+  const parsed = Number(value);
+
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${name} must be a valid number`);
+  }
+
+  return parsed;
+}
+
+const dbHost = requireEnv('DB_HOST');
+const dbPort = parseRequiredNumber('DB_PORT');
+const dbName = requireEnv('DB_NAME');
+const dbUser = requireEnv('DB_USER');
+const dbPassword = requireEnv('DB_PASSWORD');
 const dbSsl = process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false;
 
 const migrationFiles = [
