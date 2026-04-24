@@ -25,6 +25,17 @@ function parseNumber(value, defaultValue) {
   return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
+function parseCsv(value, defaultValue = []) {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function parseRequiredNumber(name) {
   const value = requireEnv(name);
   const parsed = Number(value);
@@ -40,6 +51,9 @@ export const env = {
   appName: process.env.APP_NAME || 'RohiPOS API',
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseNumber(process.env.PORT, 3001),
+  cors: {
+    allowedOrigins: parseCsv(process.env.CORS_ALLOWED_ORIGINS, ['http://localhost:5173'])
+  },
   db: {
     host: requireEnv('DB_HOST'),
     port: parseRequiredNumber('DB_PORT'),

@@ -6,8 +6,8 @@
   "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "dev": "node --env-file=.env.development --watch src/server.js",
+    "start": "node --env-file=.env.production src/server.js"
   },
   "engines": {
     "node": ">=20.0.0"
